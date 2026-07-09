@@ -1,0 +1,34 @@
+@import "tailwindcss";
+
+/*
+  A single, considered identity. Restrained palette, warm paper, ink text.
+  Tokens are defined once here and exposed to Tailwind via @theme inline, so
+  utilities like `bg-paper`, `text-ink`, `text-muted`, `border-line`,
+  `font-serif` read from the same source. See DESIGN.md.
+*/
+
+:root {
+  --paper: #fbfaf7;
+  --ink: #1c1b18;
+  --muted: #6e6a62;
+  --line: #e8e4db;
+  --accent: #5f6b5a;
+}
+
+@theme inline {
+  --color-paper: var(--paper);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-accent: var(--accent);
+  --font-sans: var(--font-inter);
+  --font-serif: var(--font-newsreader);
+}
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}

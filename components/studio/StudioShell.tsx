@@ -28,7 +28,7 @@ const CONTEXT: Record<ModeSlug, string> = {
 };
 
 const DIRECTIVE: Record<ModeSlug, string> = {
-  today: "the field moved toward you overnight",
+  today: "what deserves your attention today",
   field: "decision memory is gathering",
   formation: "one idea is crossing the threshold",
   iteration: "strengthen the mechanism",

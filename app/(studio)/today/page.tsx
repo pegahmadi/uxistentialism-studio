@@ -1,44 +1,130 @@
 import Link from "next/link";
+import { getTodayBriefing, type Evidence } from "@/lib/today";
 
 const link = "cursor-pointer border-b border-line2 text-ink hover:border-muted";
 
+// Structured provenance, shown in the same restrained mono language as the page
+// eyebrows. Authored (Workspace) evidence reads a shade stronger than derived
+// (projection/curated) evidence — the reader can always see where a line came from.
+function Provenance({ evidence }: { evidence: Evidence[] }) {
+  if (!evidence.length) return null;
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-x-2.5 gap-y-1 font-mono text-[10.5px] tracking-[0.06em]">
+      {evidence.map((e, i) => (
+        <span key={i} className="flex items-center gap-2.5">
+          {i > 0 && <span className="text-line2" aria-hidden>·</span>}
+          <span className={e.derived ? "text-faint" : "text-muted"}>
+            <span className="uppercase">{e.label}</span>
+            {e.value && <span className="text-faint">{" · "}{e.value}</span>}
+          </span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
 export default function TodayPage() {
+  const b = getTodayBriefing();
+
+  const workspaceLive = b.sources.workspace === "file";
+  const sourceLine = workspaceLive
+    ? `Drawn from your Workspace${b.updated ? ` (updated ${b.updated.at}${b.updated.by ? ` · ${b.updated.by}` : ""})` : ""} and the ${b.sources.projection === "vault" ? "vault projection" : "curated slice"}.`
+    : `Drawn from the ${b.sources.projection === "vault" ? "vault projection" : "curated slice"} — no Workspace set yet.`;
+
   return (
     <div className="mx-auto max-w-[620px] px-9 pb-[72px] pt-[84px]">
       <div className="font-mono text-[11px] font-semibold tracking-[0.08em] text-faint">
         THIS MORNING · ◆ ORIENTS
       </div>
       <h1 className="mt-4 font-serif text-[30px] font-bold leading-[1.3] tracking-[-0.015em]">
-        The field moved toward you.
+        {b.question}
       </h1>
+
       <div
-        className="mt-6 flex flex-col gap-[22px] text-[17px] leading-[1.85] text-strong"
+        className="mt-7 flex flex-col gap-[26px]"
         style={{ textWrap: "pretty" }}
       >
-        <p style={{ animation: "rise .7s ease .05s backwards" }}>
-          <b className="font-medium text-ink">Authority Architecture</b> can stand. The series has held
-          through three rounds and needs only a final read before it travels.{" "}
-          <Link href="/iteration" className={`${link} font-medium`}>Open the manuscript ↵</Link>
+        {/* primary focus */}
+        {b.focus && (
+          <div style={{ animation: "rise .7s ease .05s backwards" }}>
+            <p className="text-[17px] leading-[1.8] text-ink">
+              {b.focus.href ? (
+                <>
+                  {b.focus.text}{" "}
+                  <Link href={b.focus.href} className={link}>
+                    ↵
+                  </Link>
+                </>
+              ) : (
+                b.focus.text
+              )}
+            </p>
+            <Provenance evidence={b.focus.evidence} />
+          </div>
+        )}
+
+        {/* one field movement / emerging concept */}
+        {b.movement && (
+          <div style={{ animation: "rise .7s ease .18s backwards" }}>
+            <p className="text-[17px] leading-[1.8] text-strong">
+              {b.movement.text}
+              {b.movement.href && (
+                <>
+                  {" "}
+                  <Link href={b.movement.href} className={`${link} font-medium`}>
+                    →
+                  </Link>
+                </>
+              )}
+            </p>
+            <Provenance evidence={b.movement.evidence} />
+          </div>
+        )}
+
+        {/* one open question */}
+        {b.openQuestion && (
+          <div style={{ animation: "rise .7s ease .3s backwards" }}>
+            <p className="text-[15px] leading-[1.75] text-muted">
+              The question underneath: <i className="text-strong">{b.openQuestion.text}</i>
+            </p>
+            <Provenance evidence={b.openQuestion.evidence} />
+          </div>
+        )}
+
+        {/* one next action */}
+        {b.action && (
+          <div style={{ animation: "rise .7s ease .42s backwards" }}>
+            <p className="text-[17px] leading-[1.8] text-strong">
+              {b.action.href ? (
+                <Link href={b.action.href} className={`${link} font-medium`}>
+                  {b.action.text}
+                </Link>
+              ) : (
+                b.action.text
+              )}
+            </p>
+            <Provenance evidence={b.action.evidence} />
+          </div>
+        )}
+
+        {/* optional short note from the Workspace */}
+        {b.note && (
+          <div style={{ animation: "rise .7s ease .5s backwards" }}>
+            <p className="text-[15px] leading-[1.75] italic text-muted">{b.note.text}</p>
+            <Provenance evidence={b.note.evidence} />
+          </div>
+        )}
+
+        {/* honest sourcing — never claims activity it cannot support */}
+        <p
+          className="mt-1 font-mono text-[11px] tracking-[0.04em] text-faint"
+          style={{ animation: "rise .7s ease .58s backwards" }}
+        >
+          {sourceLine}
         </p>
-        <p style={{ animation: "rise .7s ease .18s backwards" }}>
-          Overnight the world kept arguing your case. <span className="text-amber">Cursor and AI code
-          generation are accelerating</span> — production keeps getting cheaper while no one names what
-          judgment is for. And a thread on design-system automation is echoing your claim that systems
-          are becoming decision systems.{" "}
-          <Link href="/field" className={`${link} font-medium`}>The signals are gathering in the Field</Link>, none urgent.
+        <p className="text-[15px] text-faint" style={{ animation: "rise .7s ease .66s backwards" }}>
+          — ◆
         </p>
-        <p style={{ animation: "rise .7s ease .3s backwards" }}>
-          If I may plan your day: read Authority Architecture through in the morning and let it go. Then
-          spend the afternoon in the Field, not the manuscript — <i>decision memory</i> is collecting
-          evidence faster than you are reading it.
-        </p>
-        <p className="text-[15px] text-muted" style={{ animation: "rise .7s ease .42s backwards" }}>
-          Still forming, nothing to do yet: <i>Decision Memory</i> crossed the threshold overnight —{" "}
-          <Link href="/formation" className="border-b border-line2 hover:border-muted">Formation</Link> will
-          make its case when you are ready. The question underneath it — <i>what should the system
-          remember, and why?</i> — is the one worth holding.
-        </p>
-        <p className="text-[15px] text-faint" style={{ animation: "rise .7s ease .54s backwards" }}>— ◆</p>
       </div>
     </div>
   );

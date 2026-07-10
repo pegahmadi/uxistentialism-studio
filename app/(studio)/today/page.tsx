@@ -27,9 +27,12 @@ export default function TodayPage() {
   const b = getTodayBriefing();
 
   const workspaceLive = b.sources.workspace === "file";
-  const sourceLine = workspaceLive
-    ? `Drawn from your Workspace${b.updated ? ` (updated ${b.updated.at}${b.updated.by ? ` · ${b.updated.by}` : ""})` : ""} and the ${b.sources.projection === "vault" ? "vault projection" : "curated slice"}.`
-    : `Drawn from the ${b.sources.projection === "vault" ? "vault projection" : "curated slice"} — no Workspace set yet.`;
+  const parts: string[] = [];
+  if (workspaceLive) parts.push(`your Workspace${b.updated ? ` (updated ${b.updated.at}${b.updated.by ? ` · ${b.updated.by}` : ""})` : ""}`);
+  parts.push(b.sources.projection === "vault" ? "the vault projection" : "the curated slice");
+  if (b.sources.board === "editorial-board") parts.push("the Editorial Board");
+  const joined = parts.length > 1 ? `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}` : parts[0];
+  const sourceLine = workspaceLive ? `Drawn from ${joined}.` : `Drawn from ${joined} — no Workspace set yet.`;
 
   return (
     <div className="mx-auto max-w-[620px] px-9 pb-[72px] pt-[84px]">

@@ -18,6 +18,7 @@
 
 import { getWorkspace, workspaceSource } from "./workspace";
 import { getConcepts, getEmerging, projectionSource } from "./projection";
+import { getEditorialBoard } from "./editorial-board";
 import { QUESTIONS, IDEAS, SIGNALS } from "./content";
 
 export const TODAY_QUESTION = "What deserves my attention today?";
@@ -33,6 +34,7 @@ export type EvidenceKind =
   | "formation-approved"
   | "formation-status"
   | "manuscript"
+  | "board"
   | "backlinks"
   | "question-source"
   | "curated";
@@ -60,7 +62,7 @@ export interface TodayBriefing {
   openQuestion: BriefingItem | null;
   action: BriefingItem | null;
   note: BriefingItem | null;
-  sources: { workspace: "file" | "default"; projection: "vault" | "curated" };
+  sources: { workspace: "file" | "default"; projection: "vault" | "curated"; board: "editorial-board" | "none" };
   updated: { at: string; by: string | null } | null;
 }
 
@@ -92,6 +94,16 @@ export function getTodayBriefing(): TodayBriefing {
   const emerging = [...getEmerging()].sort((a, b) => b.references - a.references);
   const concepts = [...getConcepts()].sort((a, b) => b.backlinks - a.backlinks);
 
+  // Today reads the Editorial Board projection ONLY to detect whether the active
+  // manuscript has an unresolved judgment — never to surface the judgment itself.
+  // The decision stays in Iteration; Today just points there. (Boundary: Today
+  // answers "what deserves attention", Iteration answers "what still needs judgment".)
+  const board = getEditorialBoard();
+  const activeKey = w.activeManuscript ? slugify(w.activeManuscript.id ?? w.activeManuscript.title ?? "") : "";
+  const boardKey = board?.manuscript ? slugify(board.manuscript.id ?? board.manuscript.title ?? "") : "";
+  const pendingJudgment =
+    Boolean(board) && !!activeKey && activeKey === boardKey && (board!.unresolvedQuestions.length > 0 || !!board!.nextDecision);
+
   // Track subjects already spent so later slots don't repeat the focus.
   const used = new Set<string>();
 
@@ -120,18 +132,28 @@ export function getTodayBriefing(): TodayBriefing {
     }
     focus = { text: w.focus, href: w.activeManuscript ? "/iteration" : undefined, evidence };
   } else if (w.activeManuscript?.title) {
-    // 2. Active manuscript needing movement.
+    // 2. Active manuscript. If the board still owes a ruling on it, point to
+    // Iteration (the decision lives there); otherwise frame it as needing a read.
     const m = w.activeManuscript;
     const round = m.round ?? w.reviewRound;
     used.add(slugify(m.id ?? m.title!));
-    focus = {
-      text:
-        round != null
-          ? `${m.title} is the piece in motion — round ${round}, needing a read before it travels.`
-          : `${m.title} is the piece in motion, needing a read before it travels.`,
-      href: "/iteration",
-      evidence: [ev("manuscript", "Active manuscript", false, round != null ? `${m.title} · Round ${round}` : m.title!)],
-    };
+    const manuscriptEv = ev("manuscript", "Active manuscript", false, round != null ? `${m.title} · Round ${round}` : m.title!);
+    if (pendingJudgment) {
+      focus = {
+        text: `Continue ${m.title}.`,
+        href: "/iteration",
+        evidence: [manuscriptEv, ev("board", "Unresolved judgment on the Editorial Board", true)],
+      };
+    } else {
+      focus = {
+        text:
+          round != null
+            ? `${m.title} is the piece in motion — round ${round}, needing a read before it travels.`
+            : `${m.title} is the piece in motion, needing a read before it travels.`,
+        href: "/iteration",
+        evidence: [manuscriptEv],
+      };
+    }
   } else if (approved) {
     // 3. Approved Formation topic.
     used.add(approved.key);
@@ -206,6 +228,13 @@ export function getTodayBriefing(): TodayBriefing {
   let action: BriefingItem | null = null;
   if (w.nextAction) {
     action = { text: w.nextAction, href: w.activeManuscript ? "/iteration" : undefined, evidence: [ev("workspace-action", "Authored in Workspace", false)] };
+  } else if (pendingJudgment) {
+    // Point to where the judgment is made — never restate the decision here.
+    action = {
+      text: "Return to Iteration and resolve the outstanding ruling.",
+      href: "/iteration",
+      evidence: [ev("board", "Unresolved judgment on the Editorial Board", true)],
+    };
   } else if (w.activeManuscript?.title) {
     const round = w.activeManuscript.round ?? w.reviewRound;
     action = {
@@ -234,7 +263,7 @@ export function getTodayBriefing(): TodayBriefing {
     openQuestion,
     action,
     note,
-    sources: { workspace: workspaceState, projection: projectionSource() },
+    sources: { workspace: workspaceState, projection: projectionSource(), board: pendingJudgment ? "editorial-board" : "none" },
     updated: workspaceState === "file" && w.updatedAt ? { at: w.updatedAt, by: w.updatedBy } : null,
   };
 }

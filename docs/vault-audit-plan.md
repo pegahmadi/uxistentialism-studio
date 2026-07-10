@@ -35,14 +35,21 @@ Obsidian vault  ──read-only──►  Audit tool  ── derives ──►  
 6. **Human-in-the-loop.** The tool only *proposes*. Cleanup happens in Obsidian,
    by hand. The Studio never mutates the archive.
 
-## Guiding principle: strengthen the ontology, not just the files
+## North star: coherence, not tidiness
+
+**Increase the conceptual coherence of the field, not merely reduce
+organizational entropy.** A tidy vault can still be intellectually fragmented; a
+coherent vault tells one increasingly unified story. Every recommendation is
+measured against that objective and carries a one-line coherence rationale.
 
 The audit's real goal is to improve the **architecture of the knowledge system**,
-not to tidy notes. Where the material reveals that a concept should be **split,
-renamed, elevated, or merged**, the audit should surface that as a structural
-recommendation. M1 deliberately collects the relational inputs that make this
-possible: the link graph, unresolved (referenced-but-missing) links, alias and
-duplicate collisions, tag frequency, and backlink hubs.
+not to tidy notes. It should become increasingly **diagnostic** (observations
+about the architecture of the field) rather than merely **prescriptive**
+(instructions about files) — behaving more like an architectural reviewer than a
+linter. Highest-value outputs are observations such as: *the center of gravity
+has shifted · a concept family is emerging · a concept is fragmenting · an idea
+has outgrown its location · an article is behaving like a reusable concept · a
+concept is accumulating responsibility from many directions.*
 
 ## Metadata extracted (mixed vault — lean on structure over frontmatter)
 
@@ -55,10 +62,33 @@ headings, and filenames**, using frontmatter when present:
   near-duplicate titles/aliases, **unresolved link targets**, and file mtime as a
   staleness proxy.
 
-## Classification (M2 — proposed, never auto-applied)
+## M2 — Knowledge Governance Pass (`govern.mjs`)
 
-`current` · `needs updating` · `merge candidate` · `archive candidate` ·
-`expand candidate` — each with the signals that triggered it, for review.
+A governance worklist on two distinct axes — maintenance and curation are
+different activities and must not sit beside each other as if the same:
+
+- **Curation (increases coherence):** `elevate` a referenced-but-missing concept ·
+  `promote` a concept behaving like a Core Model · `extract` a reusable concept an
+  article has coined · `refactor` an emergent concept *family* under a higher-order
+  organizing concept (not merge — keep members distinct) · update the Field Map.
+- **Maintenance (reduces entropy):** `connect` · `update` · `merge/disambiguate` ·
+  `archive`.
+
+Each recommendation carries **confidence** (high/medium/low), the **evidence**
+that triggered it, and a **coherence rationale**. The pass opens with **Field
+Diagnostics** — architectural observations, not file instructions.
+
+Two capabilities power most of the value:
+- **Implicit-link detection (vault-wide):** concept mentions in prose not yet
+  wikilinked — latent relationships to make explicit.
+- **Concept-to-concept graph:** who cites whom among `01`/`02`, enabling *promote*,
+  *refactor*, and "accumulating responsibility" diagnostics.
+
+Refinements applied: skip `Templates/`; exclude `_`-prefixed / `_Archive` / audit
+notes from concept analysis and as implicit-link sources; distinguish operational
+process notes (Council / Pegah OS / briefs / SOPs) from intellectual work.
+
+The tool proposes; the human curates. It never edits the vault.
 
 ## Vault → Studio concept mapping (M3 — by nature of the note, not by folder)
 
@@ -78,7 +108,8 @@ Idea can appear in several modes at once. Today (present) · Field (ongoing worl
 
 - **M1 — Scanner (this milestone):** read-only metadata manifest + report. Prove
   read-only; reconcile counts.
-- **M2 — Classification:** heuristic worklist → you clean up in Obsidian.
+- **M2 — Knowledge Governance Pass:** Field Diagnostics + two-axis worklist
+  (curation / maintenance) + vault-wide implicit links → you curate in Obsidian.
 - **M3 — Concept mapping + ontology recommendations:** propose concept tags,
   Connections, and split/rename/elevate/merge suggestions.
 - **M4 — Mode-view spec:** define how each mode queries the mapped material.

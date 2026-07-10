@@ -121,3 +121,31 @@ export function getGraphDetails(): Record<string, NodeDetail> {
 export function getEmerging(): { term: string; references: number }[] {
   return loadProjection()?.emerging ?? [];
 }
+
+export interface ConceptView {
+  id: string;
+  title: string;
+  summary: string;
+  backlinks: number;
+  presentIn: string[];
+  source: "vault" | "curated";
+}
+
+export function getConcepts(): ConceptView[] {
+  const proj = loadProjection();
+  if (proj) {
+    return proj.concepts.map((c) => ({
+      id: c.id,
+      title: c.title,
+      summary: c.summary,
+      backlinks: c.backlinks,
+      presentIn: c.presentIn,
+      source: "vault",
+    }));
+  }
+  return IDEAS.map((i) => ({ id: i.id, title: i.title, summary: i.thesis, backlinks: 0, presentIn: i.presentIn, source: "curated" }));
+}
+
+export function getConcept(id: string): ConceptView | null {
+  return getConcepts().find((c) => c.id === id) ?? null;
+}

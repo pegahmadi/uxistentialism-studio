@@ -263,7 +263,7 @@ export const GRAPH_NODES: GraphNode[] = [
   { id: "magnolia", label: "Magnolia", kind: "product" },
   ...SIGNALS.map((s) => ({ id: s.id, label: s.title, kind: "signal" as const })),
   { id: "the-agency-layer", label: "The Agency Layer", kind: "essay" },
-  { id: "authority-architecture-series", label: "Authority Architecture", kind: "essay" },
+  { id: "authority-architecture-series", label: "Authority Architecture (series)", kind: "essay" },
   { id: "q-where-authority", label: "Where should authority live?", kind: "question" },
   { id: "q-what-remembered", label: "What should the system remember?", kind: "question" },
 ];

@@ -5,6 +5,9 @@ import { SIGNALS, ideasInMode, type GraphNode, type GraphEdge, type NodeKind } f
 import type { NodeDetail } from "@/lib/projection";
 import { IdeaCard } from "@/components/ui/IdeaCard";
 
+const GRAPH_W = 960;
+const GRAPH_H = 560;
+
 const TYPE: Record<NodeKind, { fill: string; stroke: string; label: string; dash?: string }> = {
   concept: { fill: "#FEFCE8", stroke: "#CA8A04", label: "#CA8A04" },
   essay: { fill: "#1C1917", stroke: "#1C1917", label: "#1C1917" },
@@ -49,10 +52,13 @@ export function FieldView({
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  // Radial placement by kind (distinct bands so concepts, products, essays, and
+  // signals don't share a ring) followed by a deterministic relaxation pass that
+  // pushes apart any nodes whose labels would collide.
   const layout = useMemo(() => {
-    const C = { x: 420, y: 250 };
-    const R: Record<NodeKind, number> = { concept: 132, product: 150, essay: 168, signal: 232, question: 246 };
-    const OFF: Record<NodeKind, number> = { concept: 0.15, product: 0.9, essay: 1.4, signal: 0.35, question: 1.05 };
+    const W = GRAPH_W, H = GRAPH_H, cx = W / 2, cy = H / 2;
+    const R: Record<NodeKind, number> = { concept: 150, product: 214, essay: 258, signal: 328, question: 352 };
+    const OFF: Record<NodeKind, number> = { concept: 0.2, product: 1.15, essay: 0.5, signal: 0.15, question: 0.8 };
     const totals: Record<string, number> = {};
     graphNodes.forEach((n) => (totals[n.kind] = (totals[n.kind] || 0) + 1));
     const idx: Record<string, number> = {};
@@ -67,8 +73,33 @@ export function FieldView({
       const t = totals[n.kind];
       const a = (i / t) * Math.PI * 2 + OFF[n.kind];
       const r = R[n.kind];
-      const base = n.kind === "concept" ? 15 + (deg[n.id] || 0) * 1.6 : n.kind === "signal" ? 10 : n.kind === "question" ? 12 : 15;
-      pos[n.id] = { x: C.x + Math.cos(a) * r * 1.42, y: C.y + Math.sin(a) * r, r: Math.min(base, 30) };
+      const base = n.kind === "concept" ? 14 + (deg[n.id] || 0) * 1.4 : n.kind === "signal" ? 10 : n.kind === "question" ? 12 : 14;
+      pos[n.id] = { x: cx + Math.cos(a) * r * 1.28, y: cy + Math.sin(a) * r, r: Math.min(base, 28) };
+    }
+
+    const ids = graphNodes.map((n) => n.id);
+    for (let it = 0; it < 90; it++) {
+      for (let a = 0; a < ids.length; a++) {
+        for (let b = a + 1; b < ids.length; b++) {
+          const A = pos[ids[a]], B = pos[ids[b]];
+          const dx = B.x - A.x, dy = B.y - A.y;
+          const d = Math.hypot(dx, dy) || 0.01;
+          const min = A.r + B.r + 48; // room for labels
+          if (d < min) {
+            const push = ((min - d) / 2) * 0.6;
+            const ux = dx / d, uy = dy / d;
+            A.x -= ux * push;
+            A.y -= uy * push;
+            B.x += ux * push;
+            B.y += uy * push;
+          }
+        }
+      }
+      for (const id of ids) {
+        const p = pos[id];
+        p.x = Math.max(p.r + 90, Math.min(W - p.r - 90, p.x));
+        p.y = Math.max(p.r + 20, Math.min(H - p.r - 22, p.y));
+      }
     }
     return pos;
   }, [graphNodes, graphEdges]);
@@ -138,7 +169,7 @@ export function FieldView({
       ) : (
         <div className="flex min-h-0 flex-1">
           <div className="relative flex-1 overflow-hidden bg-surface">
-            <svg viewBox="0 0 840 520" preserveAspectRatio="xMidYMid meet" className="absolute inset-0 h-full w-full">
+            <svg viewBox={`0 0 ${GRAPH_W} ${GRAPH_H}`} preserveAspectRatio="xMidYMid meet" className="absolute inset-0 h-full w-full">
               {graphEdges.map((e, i) => {
                 const a = layout[e.from], b = layout[e.to];
                 if (!a || !b) return null;

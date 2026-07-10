@@ -1,3 +1,7 @@
+# Vault audit — never commit vault-derived material or the local vault path
+.vault-audit/
+tools/vault-audit/audit.config.json
+
 # Logs
 logs
 *.log

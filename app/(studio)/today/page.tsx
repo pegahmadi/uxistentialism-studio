@@ -1,59 +1,45 @@
-import { getMode } from "@/lib/modes";
-import { ModeHeader } from "@/components/studio/ModeHeader";
-import { ideasInMode, productsInMode, writingInMode, questionsInMode } from "@/lib/content";
-import { IdeaCard } from "@/components/ui/IdeaCard";
-import { WritingCard } from "@/components/ui/WritingCard";
-import { ProductCard } from "@/components/ui/ProductCard";
+import Link from "next/link";
 
-const mode = getMode("today")!;
+const link = "cursor-pointer border-b border-line2 text-ink hover:border-muted";
 
 export default function TodayPage() {
-  const ideas = ideasInMode("today");
-  const products = productsInMode("today");
-  const writing = writingInMode("today");
-  const questions = questionsInMode("today");
-
   return (
-    <div>
-      <ModeHeader mode={mode} />
-
-      <p className="mb-8 max-w-xl font-serif text-lg leading-relaxed text-ink">
-        A few threads are alive right now. Nothing here is overdue — this is only
-        where attention is best spent today.
-      </p>
-
-      <section className="mb-14">
-        <div className="grid gap-4 sm:grid-cols-2">
-          {ideas.map((idea) => (
-            <IdeaCard key={idea.id} idea={idea} />
-          ))}
-        </div>
-      </section>
-
-      {questions.length > 0 && (
-        <section className="mb-14">
-          <h2 className="mb-3 text-xs uppercase tracking-[0.18em] text-muted">Open questions</h2>
-          <ul className="flex flex-col gap-2">
-            {questions.map((q) => (
-              <li key={q.id} className="font-serif text-lg italic text-muted">
-                {q.text}
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-
-      <section>
-        <h2 className="mb-4 text-xs uppercase tracking-[0.18em] text-muted">In the workshop</h2>
-        <div className="grid gap-4 sm:grid-cols-2">
-          {products.map((p) => (
-            <ProductCard key={p.id} product={p} />
-          ))}
-          {writing.map((w) => (
-            <WritingCard key={w.id} writing={w} />
-          ))}
-        </div>
-      </section>
+    <div className="mx-auto max-w-[620px] px-9 pb-[72px] pt-[84px]">
+      <div className="font-mono text-[11px] font-semibold tracking-[0.08em] text-faint">
+        THIS MORNING · ◆ ORIENTS
+      </div>
+      <h1 className="mt-4 font-serif text-[30px] font-bold leading-[1.3] tracking-[-0.015em]">
+        The field moved toward you.
+      </h1>
+      <div
+        className="mt-6 flex flex-col gap-[22px] text-[17px] leading-[1.85] text-strong"
+        style={{ textWrap: "pretty" }}
+      >
+        <p style={{ animation: "rise .7s ease .05s backwards" }}>
+          <b className="font-medium text-ink">Authority Architecture</b> can stand. The series has held
+          through three rounds and needs only a final read before it travels.{" "}
+          <Link href="/iteration" className={`${link} font-medium`}>Open the manuscript ↵</Link>
+        </p>
+        <p style={{ animation: "rise .7s ease .18s backwards" }}>
+          Overnight the world kept arguing your case. <span className="text-amber">Cursor and AI code
+          generation are accelerating</span> — production keeps getting cheaper while no one names what
+          judgment is for. And a thread on design-system automation is echoing your claim that systems
+          are becoming decision systems.{" "}
+          <Link href="/field" className={`${link} font-medium`}>The signals are gathering in the Field</Link>, none urgent.
+        </p>
+        <p style={{ animation: "rise .7s ease .3s backwards" }}>
+          If I may plan your day: read Authority Architecture through in the morning and let it go. Then
+          spend the afternoon in the Field, not the manuscript — <i>decision memory</i> is collecting
+          evidence faster than you are reading it.
+        </p>
+        <p className="text-[15px] text-muted" style={{ animation: "rise .7s ease .42s backwards" }}>
+          Still forming, nothing to do yet: <i>Decision Memory</i> crossed the threshold overnight —{" "}
+          <Link href="/formation" className="border-b border-line2 hover:border-muted">Formation</Link> will
+          make its case when you are ready. The question underneath it — <i>what should the system
+          remember, and why?</i> — is the one worth holding.
+        </p>
+        <p className="text-[15px] text-faint" style={{ animation: "rise .7s ease .54s backwards" }}>— ◆</p>
+      </div>
     </div>
   );
 }

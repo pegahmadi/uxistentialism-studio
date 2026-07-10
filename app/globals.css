@@ -1,34 +1,95 @@
 @import "tailwindcss";
 
 /*
-  A single, considered identity. Restrained palette, warm paper, ink text.
-  Tokens are defined once here and exposed to Tailwind via @theme inline, so
-  utilities like `bg-paper`, `text-ink`, `text-muted`, `border-line`,
-  `font-serif` read from the same source. See DESIGN.md.
+  v3 visual language over the existing architecture. Warm stone paper, ink text,
+  amber = needs judgment, green = protected / observation. Three type roles:
+  Libre Baskerville (serif — headlines, manuscript), Inter (sans — interface),
+  Source Code Pro (mono — marks, status strip). See DESIGN.md / the v3 doctrine.
 */
 
 :root {
-  --paper: #fbfaf7;
-  --ink: #1c1b18;
-  --muted: #6e6a62;
-  --line: #e8e4db;
-  --accent: #5f6b5a;
+  --paper: #fafaf9;
+  --ink: #1c1917;
+  --strong: #57534e;
+  --muted: #78716c;
+  --faint: #a8a29e;
+  --line: #e7e5e4;
+  --line2: #d6d3d1;
+  --surface: #f5f5f4;
+  --surface2: #efedeb;
+  --amber: #ca8a04;
+  --green: #65a30d;
 }
 
 @theme inline {
   --color-paper: var(--paper);
   --color-ink: var(--ink);
+  --color-strong: var(--strong);
   --color-muted: var(--muted);
+  --color-faint: var(--faint);
   --color-line: var(--line);
-  --color-accent: var(--accent);
+  --color-line2: var(--line2);
+  --color-surface: var(--surface);
+  --color-surface2: var(--surface2);
+  --color-amber: var(--amber);
+  --color-green: var(--green);
+  --font-serif: var(--font-libre);
   --font-sans: var(--font-inter);
-  --font-serif: var(--font-newsreader);
+  --font-mono: var(--font-scp);
+}
+
+html,
+body {
+  height: 100%;
 }
 
 body {
   background: var(--paper);
   color: var(--ink);
-  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  font-family: var(--font-sans), -apple-system, "Segoe UI", Helvetica, sans-serif;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  overflow: hidden; /* full-screen app; environments scroll internally */
+}
+
+::selection {
+  background: #efedeb;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #d6d3d1 transparent;
+}
+
+[contenteditable]:focus {
+  outline: none;
+}
+
+/* ── motion — quiet, from the v3 prototype ── */
+@keyframes rise {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes settle {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes veil {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes caret {
+  0%, 45% { opacity: 1; }
+  50%, 95% { opacity: 0; }
+}
+@keyframes breathe {
+  0%, 100% { opacity: 0.85; }
+  50% { opacity: 0.35; }
+}
+@keyframes flowdash {
+  to { stroke-dashoffset: -24; }
+}
+
+.env-enter {
+  animation: settle 0.45s cubic-bezier(0.22, 0.75, 0.3, 1);
 }

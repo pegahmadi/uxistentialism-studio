@@ -1,0 +1,208 @@
+{
+  "generatedAt": "2026-07-10T03:18:22.156Z",
+  "source": "obsidian-vault (sanitized · metadata-only · no bodies)",
+  "concepts": [
+    {
+      "id": "authority-architecture",
+      "title": "Authority Architecture",
+      "kind": "core",
+      "category": "authority",
+      "summary": "Governance for AI-native systems is an architecture problem: authority has to be designed, placed, and made legible — not assumed.",
+      "presentIn": [
+        "today",
+        "iteration",
+        "memory"
+      ],
+      "backlinks": 37
+    },
+    {
+      "id": "agency-stack",
+      "title": "Agency Stack",
+      "kind": "core",
+      "category": "authority",
+      "summary": "Agency in AI systems is layered; naming the stack shows where human judgment must sit.",
+      "presentIn": [
+        "iteration",
+        "formation"
+      ],
+      "backlinks": 27
+    },
+    {
+      "id": "escalation-architecture",
+      "title": "Escalation Architecture",
+      "kind": "core",
+      "category": "authority",
+      "summary": "Escalation routes a decision to the right level of authority instead of automating everything equally.",
+      "presentIn": [
+        "today",
+        "iteration"
+      ],
+      "backlinks": 26
+    },
+    {
+      "id": "governance-debt",
+      "title": "Governance Debt",
+      "kind": "concept",
+      "category": "governance",
+      "summary": "The deferred cost of automations no one owns — it compounds quietly, like technical debt.",
+      "presentIn": [
+        "formation",
+        "iteration"
+      ],
+      "backlinks": 16
+    },
+    {
+      "id": "design-systems-decision-systems",
+      "title": "Design Systems Becoming Decision Systems",
+      "kind": "concept",
+      "category": "design",
+      "summary": "Design systems stopped being component libraries and became systems that make decisions.",
+      "presentIn": [
+        "field",
+        "iteration",
+        "memory"
+      ],
+      "backlinks": 34
+    },
+    {
+      "id": "authority-collapse",
+      "title": "Authority Collapse",
+      "kind": "concept",
+      "category": "authority",
+      "summary": "The failure mode where authority quietly drains out of a system until no one can say who decided.",
+      "presentIn": [
+        "field",
+        "iteration"
+      ],
+      "backlinks": 43
+    },
+    {
+      "id": "human-authority-layer",
+      "title": "Human Authority Layer",
+      "kind": "concept",
+      "category": "authority",
+      "summary": "The designed place in a system where a human retains and exercises decision authority.",
+      "presentIn": [
+        "iteration",
+        "memory"
+      ],
+      "backlinks": 26
+    },
+    {
+      "id": "governance-layer",
+      "title": "Governance Layer",
+      "kind": "concept",
+      "category": "governance",
+      "summary": "Where a system's decisions are checked, recorded, and owned.",
+      "presentIn": [
+        "formation",
+        "iteration"
+      ],
+      "backlinks": 20
+    }
+  ],
+  "connections": [
+    {
+      "from": "authority-architecture",
+      "to": "human-authority-layer"
+    },
+    {
+      "from": "authority-architecture",
+      "to": "governance-layer"
+    },
+    {
+      "from": "authority-architecture",
+      "to": "authority-collapse"
+    },
+    {
+      "from": "agency-stack",
+      "to": "authority-architecture"
+    },
+    {
+      "from": "authority-architecture",
+      "to": "escalation-architecture"
+    },
+    {
+      "from": "authority-architecture",
+      "to": "design-systems-decision-systems"
+    },
+    {
+      "from": "authority-architecture",
+      "to": "governance-debt"
+    },
+    {
+      "from": "agency-stack",
+      "to": "authority-collapse"
+    },
+    {
+      "from": "agency-stack",
+      "to": "escalation-architecture"
+    },
+    {
+      "from": "agency-stack",
+      "to": "design-systems-decision-systems"
+    },
+    {
+      "from": "authority-collapse",
+      "to": "escalation-architecture"
+    },
+    {
+      "from": "design-systems-decision-systems",
+      "to": "escalation-architecture"
+    },
+    {
+      "from": "authority-collapse",
+      "to": "governance-debt"
+    },
+    {
+      "from": "authority-collapse",
+      "to": "design-systems-decision-systems"
+    },
+    {
+      "from": "governance-layer",
+      "to": "human-authority-layer"
+    },
+    {
+      "from": "governance-debt",
+      "to": "human-authority-layer"
+    },
+    {
+      "from": "authority-collapse",
+      "to": "human-authority-layer"
+    },
+    {
+      "from": "escalation-architecture",
+      "to": "human-authority-layer"
+    },
+    {
+      "from": "governance-debt",
+      "to": "governance-layer"
+    },
+    {
+      "from": "authority-collapse",
+      "to": "governance-layer"
+    },
+    {
+      "from": "escalation-architecture",
+      "to": "governance-layer"
+    }
+  ],
+  "emerging": [
+    {
+      "term": "decision memory",
+      "references": 7
+    },
+    {
+      "term": "hallucinated authority",
+      "references": 7
+    },
+    {
+      "term": "governance drift",
+      "references": 4
+    },
+    {
+      "term": "human judgment",
+      "references": 3
+    }
+  ]
+}

@@ -239,3 +239,64 @@ export const productsInMode = (slug: ModeSlug) => PRODUCTS.filter((p) => p.prese
 export const writingInMode = (slug: ModeSlug) => WRITING.filter((w) => w.presentIn.includes(slug));
 export const signalsInMode = (slug: ModeSlug) => SIGNALS.filter((s) => s.presentIn.includes(slug));
 export const questionsInMode = (slug: ModeSlug) => QUESTIONS.filter((q) => q.presentIn.includes(slug));
+
+// ── Concept relationships ──────────────────────────────────────────────────
+// The substrate for the Field graph and the Formation convergence. Additive to
+// the model; ids reference the entities above. This is the app-side echo of the
+// vault's link graph — connections are first-class, not a visualization bolted on.
+
+export type NodeKind = "concept" | "signal" | "essay" | "product" | "question";
+
+export interface GraphNode {
+  id: string;
+  label: string;
+  kind: NodeKind;
+}
+
+export interface GraphEdge {
+  from: string;
+  to: string;
+}
+
+export const GRAPH_NODES: GraphNode[] = [
+  ...IDEAS.map((i) => ({ id: i.id, label: i.title, kind: "concept" as const })),
+  { id: "magnolia", label: "Magnolia", kind: "product" },
+  ...SIGNALS.map((s) => ({ id: s.id, label: s.title, kind: "signal" as const })),
+  { id: "the-agency-layer", label: "The Agency Layer", kind: "essay" },
+  { id: "authority-architecture-series", label: "Authority Architecture", kind: "essay" },
+  { id: "q-where-authority", label: "Where should authority live?", kind: "question" },
+  { id: "q-what-remembered", label: "What should the system remember?", kind: "question" },
+];
+
+export const GRAPH_EDGES: GraphEdge[] = [
+  { from: "authority-architecture", to: "escalation-architecture" },
+  { from: "authority-architecture", to: "agency-stack" },
+  { from: "authority-architecture", to: "governance-debt" },
+  { from: "authority-architecture", to: "human-judgment" },
+  { from: "governance-debt", to: "decision-memory" },
+  { from: "escalation-architecture", to: "human-judgment" },
+  { from: "design-systems-decision-systems", to: "governance-debt" },
+  { from: "design-systems-decision-systems", to: "design-systems-decision-systems-signal" },
+  { from: "magnolia", to: "authority-architecture" },
+  { from: "magnolia", to: "decision-memory" },
+  { from: "magnolia", to: "governance-debt" },
+  { from: "the-agency-layer", to: "agency-stack" },
+  { from: "authority-architecture-series", to: "authority-architecture" },
+  { from: "authority-architecture-series", to: "escalation-architecture" },
+  { from: "cursor", to: "human-judgment" },
+  { from: "ai-code-generation", to: "human-judgment" },
+  { from: "mcp", to: "authority-architecture" },
+  { from: "figma-automation", to: "design-systems-decision-systems" },
+  { from: "q-where-authority", to: "authority-architecture" },
+  { from: "q-where-authority", to: "escalation-architecture" },
+  { from: "q-what-remembered", to: "decision-memory" },
+  { from: "q-what-remembered", to: "governance-debt" },
+];
+
+export const nodeById = (id: string) => GRAPH_NODES.find((n) => n.id === id);
+
+export const neighborsOf = (id: string) =>
+  GRAPH_EDGES.filter((e) => e.from === id || e.to === id).map((e) =>
+    e.from === id ? e.to : e.from,
+  );
+

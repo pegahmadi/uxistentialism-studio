@@ -1,0 +1,78 @@
+{
+  "_comment": "PRIVACY GATE for the Obsidian projection. ONLY items listed here are projected, and ONLY the metadata fields below — never note bodies, never private notes. This file and the generated data/projections/obsidian.json are committed to a PUBLIC repo, so everything here must be public-safe. Review before regenerating. vaultKey = the note's filename (lowercased, no extension).",
+  "concepts": [
+    {
+      "vaultKey": "authority architecture",
+      "id": "authority-architecture",
+      "title": "Authority Architecture",
+      "kind": "core",
+      "category": "authority",
+      "summary": "Governance for AI-native systems is an architecture problem: authority has to be designed, placed, and made legible — not assumed.",
+      "presentIn": ["today", "iteration", "memory"]
+    },
+    {
+      "vaultKey": "agency stack",
+      "id": "agency-stack",
+      "title": "Agency Stack",
+      "kind": "core",
+      "category": "authority",
+      "summary": "Agency in AI systems is layered; naming the stack shows where human judgment must sit.",
+      "presentIn": ["iteration", "formation"]
+    },
+    {
+      "vaultKey": "escalation architecture",
+      "id": "escalation-architecture",
+      "title": "Escalation Architecture",
+      "kind": "core",
+      "category": "authority",
+      "summary": "Escalation routes a decision to the right level of authority instead of automating everything equally.",
+      "presentIn": ["today", "iteration"]
+    },
+    {
+      "vaultKey": "governance debt",
+      "id": "governance-debt",
+      "title": "Governance Debt",
+      "kind": "concept",
+      "category": "governance",
+      "summary": "The deferred cost of automations no one owns — it compounds quietly, like technical debt.",
+      "presentIn": ["formation", "iteration"]
+    },
+    {
+      "vaultKey": "design systems becoming decision systems",
+      "id": "design-systems-decision-systems",
+      "title": "Design Systems Becoming Decision Systems",
+      "kind": "concept",
+      "category": "design",
+      "summary": "Design systems stopped being component libraries and became systems that make decisions.",
+      "presentIn": ["field", "iteration", "memory"]
+    },
+    {
+      "vaultKey": "authority collapse",
+      "id": "authority-collapse",
+      "title": "Authority Collapse",
+      "kind": "concept",
+      "category": "authority",
+      "summary": "The failure mode where authority quietly drains out of a system until no one can say who decided.",
+      "presentIn": ["field", "iteration"]
+    },
+    {
+      "vaultKey": "human authority layer",
+      "id": "human-authority-layer",
+      "title": "Human Authority Layer",
+      "kind": "concept",
+      "category": "authority",
+      "summary": "The designed place in a system where a human retains and exercises decision authority.",
+      "presentIn": ["iteration", "memory"]
+    },
+    {
+      "vaultKey": "governance layer",
+      "id": "governance-layer",
+      "title": "Governance Layer",
+      "kind": "concept",
+      "category": "governance",
+      "summary": "Where a system's decisions are checked, recorded, and owned.",
+      "presentIn": ["formation", "iteration"]
+    }
+  ],
+  "emerging": ["decision memory", "hallucinated authority", "governance drift", "human judgment"]
+}

@@ -31,6 +31,8 @@ export interface Mode {
   time: string;
   /** The posture of thinking this space invites. */
   posture: string;
+  /** Monospace glyph used as the environment's mark in the sidebar (v3). */
+  mark: string;
 }
 
 export const MODES: Mode[] = [
@@ -40,6 +42,7 @@ export const MODES: Mode[] = [
     question: "Where should I spend my attention?",
     time: "The present",
     posture: "Orientation — a quiet read on where attention is best spent now.",
+    mark: "◈",
   },
   {
     slug: "field",
@@ -47,6 +50,7 @@ export const MODES: Mode[] = [
     question: "What is happening in the world?",
     time: "The ongoing present",
     posture: "Observing — gathering signals and sources as they stream in.",
+    mark: "⁘",
   },
   {
     slug: "formation",
@@ -54,6 +58,7 @@ export const MODES: Mode[] = [
     question: "What is worth writing?",
     time: "The not-yet",
     posture: "Shaping — turning attention into a thesis worth pursuing.",
+    mark: "◉",
   },
   {
     slug: "iteration",
@@ -61,6 +66,7 @@ export const MODES: Mode[] = [
     question: "How do I strengthen this work?",
     time: "The near past, reopened",
     posture: "Developing — revisiting an idea to make it more considered.",
+    mark: "¶",
   },
   {
     slug: "distribution",
@@ -68,6 +74,7 @@ export const MODES: Mode[] = [
     question: "How should this idea travel?",
     time: "The moment of release",
     posture: "Composing — shaping how a thought reaches other people.",
+    mark: "⇢",
   },
   {
     slug: "memory",
@@ -75,6 +82,7 @@ export const MODES: Mode[] = [
     question: "What has this work become?",
     time: "The accumulated past",
     posture: "Reflecting — seeing what an idea accumulated into over time.",
+    mark: "§",
   },
 ];
 

@@ -1,0 +1,31 @@
+{
+  "_comment": "PROJECTION of a completed Claude Editorial Board review — the sanitized snapshot Iteration reads. Human-curated for now (no machine-readable board output yet); populate it by hand from a finished review. Committed to a PUBLIC repo, so keep it public-safe: SHORT diagnostic summaries only. NO manuscript body, NO private Claude transcript, NO API keys. The app never runs a review or calls an API — it only reads this file. Every field optional except schemaVersion; Iteration falls back to curated content when this file is absent. Convention: unresolvedQuestions[0] is the most consequential.",
+  "schemaVersion": 1,
+  "manuscript": {
+    "id": "concept-or-idea-id",
+    "title": "Human-readable title",
+    "reviewRound": 3,
+    "status": "in review — e.g. in review | revising | ready"
+  },
+  "reviewedAt": "2026-07-09",
+  "reviewers": [
+    {
+      "role": "Evidence | Method | Structure | … (a short role name)",
+      "diagnosis": "One short, public-safe sentence — what this reviewer sees.",
+      "recommendation": "One short recommendation. Reviewers advise; they do not decide.",
+      "confidence": "low | medium | high (optional)"
+    }
+  ],
+  "unresolvedQuestions": ["The open question the review left — most consequential first"],
+  "rulings": [
+    {
+      "on": "What this ruling resolves (a short thread name)",
+      "decision": "Your decision. A ruling is a decision record, not commentary."
+    }
+  ],
+  "deferredThreads": ["A thread set aside for later, in a few words"],
+  "nextDecision": "The next human decision this review is waiting on",
+  "sourceLabel": "Claude Editorial Board · curated",
+  "updatedAt": "2026-07-10",
+  "updatedBy": "human — one of: human | claude"
+}

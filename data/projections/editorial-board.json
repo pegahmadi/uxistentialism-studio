@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "manuscript": {
+    "id": "authority-architecture",
+    "title": "Authority Architecture",
+    "reviewRound": 3,
+    "status": "in review"
+  },
+  "reviewedAt": "2026-07-09",
+  "reviewers": [
+    {
+      "role": "Evidence",
+      "diagnosis": "§3's mechanism claim rests on assertion, not a documented case.",
+      "recommendation": "Ground §3 in one real case before it travels.",
+      "confidence": "high"
+    },
+    {
+      "role": "Method",
+      "diagnosis": "The mechanism is theorized ahead of observation.",
+      "recommendation": "Observe first; let the evidence follow.",
+      "confidence": "medium"
+    }
+  ],
+  "unresolvedQuestions": [
+    "Does §3's mechanism need a documented case, or observation first?"
+  ],
+  "rulings": [
+    {
+      "on": "Whether §3 requires a documented case",
+      "decision": "Evidence that follows observation persuades; evidence that precedes it decorates."
+    }
+  ],
+  "deferredThreads": [
+    "Whether escalation tiers belong in §4 or a separate piece."
+  ],
+  "nextDecision": "Rule on §3: require a documented case, or reframe the section as observation-first.",
+  "sourceLabel": "Claude Editorial Board · curated",
+  "updatedAt": "2026-07-10",
+  "updatedBy": "human"
+}

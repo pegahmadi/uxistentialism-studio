@@ -1,20 +1,47 @@
-import { IDEAS } from "@/lib/content";
+import { getIterationView, type Evidence } from "@/lib/iteration";
 
-const idea = IDEAS.find((i) => i.id === "authority-architecture")!;
+// Structured provenance in the same restrained mono language used across the Studio.
+// Authored (Workspace) reads a shade stronger than projected/curated.
+function Provenance({ evidence }: { evidence: Evidence[] }) {
+  if (!evidence.length) return null;
+  return (
+    <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-[10px] tracking-[0.06em]">
+      {evidence.map((e, i) => (
+        <span key={i} className="flex items-center gap-2">
+          {i > 0 && <span className="text-line2" aria-hidden>·</span>}
+          <span className={e.kind === "workspace" ? "text-muted" : "text-faint"}>
+            <span className="uppercase">{e.label}</span>
+            {e.value && <span className="text-faint">{" · "}{e.value}</span>}
+          </span>
+        </span>
+      ))}
+    </div>
+  );
+}
 
 export default function IterationPage() {
+  const v = getIterationView();
+  const m = v.manuscript;
+  const meta = [m.venue, m.status].filter(Boolean).join(" · ");
+
   return (
     <div className="flex items-start justify-center gap-12 px-10 pb-[72px] pt-[72px]">
-      {/* manuscript — sacred, widest, calmest */}
+      {/* manuscript — sacred, widest, calmest. BODY PRESERVED EXACTLY AS CURATED. */}
       <div className="min-w-[340px] max-w-[600px] flex-[0_1_600px]">
         <div className="mb-2 flex flex-wrap items-baseline justify-between gap-4">
           <span className="font-mono text-[11px] font-semibold tracking-[0.08em] text-faint">
-            ITERATION · AUTHORITY ARCHITECTURE · ROUND 3
+            ITERATION · {m.title.toUpperCase()}
+            {m.round != null && ` · ROUND ${m.round}`}
           </span>
           <span className="flex-none font-mono text-[11px] tracking-[0.04em] text-faint">
-            series, in review · medium
+            {meta || "in review"}
           </span>
         </div>
+        {v.roundMismatch && (
+          <div className="mb-4 border-l-2 border-amber pl-3 font-mono text-[11px] leading-[1.6] text-amber">
+            You are on round {v.roundMismatch.workspace}; the board last reviewed round {v.roundMismatch.board}.
+          </div>
+        )}
         <div className="mb-6 font-mono text-[11px] font-semibold tracking-[0.08em] text-faint">
           § THE MECHANISM QUESTION
         </div>
@@ -35,43 +62,87 @@ export default function IterationPage() {
         </div>
       </div>
 
-      {/* margin — board & lineage, never competing with the manuscript */}
+      {/* margin — board & lineage, driven by the projection, never competing with the manuscript */}
       <div className="flex w-[300px] flex-none flex-col gap-3.5 pt-[52px]">
-        <div className="border-l-2 border-amber px-3.5 py-2">
-          <div className="font-mono text-[11px] font-semibold tracking-[0.06em] text-amber" style={{ animation: "breathe 4.5s ease infinite" }}>
-            THE BOARD HAS A QUESTION
+        {/* the board's question + its stance (disagreement only when it materially differs) */}
+        {(v.consequentialQuestion || v.board.stance !== "none") && (
+          <div className="border-l-2 border-amber px-3.5 py-2">
+            <div className="font-mono text-[11px] font-semibold tracking-[0.06em] text-amber" style={{ animation: "breathe 4.5s ease infinite" }}>
+              THE BOARD HAS A QUESTION
+            </div>
+            {v.consequentialQuestion && (
+              <div className="mt-1.5 text-[13px] leading-[1.65] text-muted">{v.consequentialQuestion.text}</div>
+            )}
+            <div className="mt-1.5 text-[12px] leading-[1.6] text-faint">{v.board.summary}</div>
+            <Provenance evidence={v.consequentialQuestion?.evidence ?? v.board.evidence} />
           </div>
-          <div className="mt-1.5 text-[13px] leading-[1.65] text-muted">
-            ❧ and ▦ disagree about §3&rsquo;s ground. One ruling, when you&rsquo;re ready.
-          </div>
-        </div>
+        )}
 
-        <div className="overflow-hidden border border-line2 bg-paper">
-          <div className="flex justify-between border-b border-[#fef08a] bg-[#fefce8] px-4 py-2.5 font-mono text-[11px] font-semibold tracking-[0.06em] text-amber">
-            <span>THE BOARD · 3 VOICES</span><span>YOUR RULING</span>
-          </div>
-          <div className="border-b border-line px-4 py-3 text-[13px] leading-[1.65] text-strong">
-            <span className="font-mono text-[11px] font-semibold text-muted">▦</span> This claim needs evidence — a documented case.
-          </div>
-          <div className="border-b border-line px-4 py-3 text-[13px] leading-[1.65] text-strong">
-            <span className="font-mono text-[11px] font-semibold text-green">❧</span> Disagree — observe first. You&rsquo;re theorizing.
-          </div>
-          <div className="px-4 py-3 text-[13px] leading-[1.65] text-strong">
-            <span className="font-mono text-[11px] font-semibold text-ink">●</span> Evidence that follows observation persuades; evidence that precedes it decorates.
-          </div>
-        </div>
-
-        <div>
-          <div className="mb-2 font-mono text-[11px] font-semibold tracking-[0.08em] text-faint">PAST ROUNDS · ❧</div>
-          <ol className="flex flex-col gap-2.5 border-l border-line pl-5">
-            {idea.lineage?.map((entry, i) => (
-              <li key={i} className="relative text-[13px] leading-[1.6] text-muted">
-                <span className="absolute -left-[1.55rem] top-[6px] h-1.5 w-1.5 rounded-full bg-line2" aria-hidden />
-                {entry}
-              </li>
+        {/* the board — advisory voices. YOU DECIDE. */}
+        {v.board.reviewers.length > 0 && (
+          <div className="overflow-hidden border border-line2 bg-paper">
+            <div className="flex justify-between border-b border-[#fef08a] bg-[#fefce8] px-4 py-2.5 font-mono text-[11px] font-semibold tracking-[0.06em] text-amber">
+              <span>THE BOARD · {v.board.reviewers.length} {v.board.reviewers.length === 1 ? "VOICE" : "VOICES"}</span>
+              <span>YOU DECIDE</span>
+            </div>
+            {v.board.reviewers.map((r, i) => (
+              <div key={i} className="border-b border-line px-4 py-3 last:border-0">
+                <div className="text-[13px] leading-[1.6] text-strong">
+                  <span className="font-mono text-[11px] font-semibold text-muted">{r.glyph}</span>{" "}
+                  <span className="font-mono text-[10px] uppercase tracking-[0.06em] text-faint">{r.role}</span>
+                  {r.confidence && <span className="font-mono text-[10px] uppercase tracking-[0.06em] text-faint"> · {r.confidence}</span>}
+                </div>
+                {r.recommendation && <div className="mt-1 text-[13px] leading-[1.6] text-strong">{r.recommendation}</div>}
+                {r.diagnosis && <div className="mt-0.5 text-[12px] leading-[1.55] text-muted">{r.diagnosis}</div>}
+              </div>
             ))}
-          </ol>
-        </div>
+            <Provenance evidence={v.board.evidence} />
+          </div>
+        )}
+
+        {/* rulings — YOUR decisions, visually distinct from the advisory voices above */}
+        {v.rulings.items.length > 0 && (
+          <div>
+            <div className="mb-2 font-mono text-[11px] font-semibold tracking-[0.08em] text-faint">
+              YOUR RULINGS · {v.rulings.items.length} {v.rulings.items.length === 1 ? "DECISION" : "DECISIONS"}
+            </div>
+            <div className="flex flex-col gap-2">
+              {v.rulings.items.map((r, i) => (
+                <div key={i} className="border-l-2 border-ink bg-paper px-3.5 py-2.5">
+                  {r.on && (
+                    <div className="font-mono text-[10px] uppercase tracking-[0.06em] text-faint">on · {r.on}</div>
+                  )}
+                  <div className="mt-1 text-[13px] leading-[1.6] font-medium text-ink">{r.decision}</div>
+                </div>
+              ))}
+            </div>
+            <Provenance evidence={v.rulings.evidence} />
+          </div>
+        )}
+
+        {/* the next decision the review is waiting on — the board advises, you decide */}
+        {v.nextDecision && (
+          <div className="border-l-2 border-ink px-3.5 py-2">
+            <div className="font-mono text-[11px] font-semibold tracking-[0.06em] text-ink">YOUR NEXT DECISION</div>
+            <div className="mt-1.5 text-[13px] leading-[1.65] text-strong">{v.nextDecision.text}</div>
+            <Provenance evidence={v.nextDecision.evidence} />
+          </div>
+        )}
+
+        {/* past rounds — curated lineage */}
+        {v.pastRounds.length > 0 && (
+          <div>
+            <div className="mb-2 font-mono text-[11px] font-semibold tracking-[0.08em] text-faint">PAST ROUNDS · ❧</div>
+            <ol className="flex flex-col gap-2.5 border-l border-line pl-5">
+              {v.pastRounds.map((entry, i) => (
+                <li key={i} className="relative text-[13px] leading-[1.6] text-muted">
+                  <span className="absolute -left-[1.55rem] top-[6px] h-1.5 w-1.5 rounded-full bg-line2" aria-hidden />
+                  {entry}
+                </li>
+              ))}
+            </ol>
+          </div>
+        )}
 
         <div className="pt-1 font-mono text-[12px] tracking-[0.01em] text-faint">
           evidence · revision plan · past rounds — ⌘K

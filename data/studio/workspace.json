@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "status": "active",
+  "focus": "Give Authority Architecture its final read, then let it travel.",
+  "activeManuscript": {
+    "id": "authority-architecture",
+    "title": "Authority Architecture",
+    "round": 3,
+    "venue": "Medium"
+  },
+  "reviewRound": 3,
+  "approvedFormationTopic": "decision-memory",
+  "openQuestions": ["What should the system remember, and why?"],
+  "paused": [],
+  "todayNote": "",
+  "nextAction": "Read Authority Architecture through in the morning and let it go.",
+  "updatedAt": "2026-07-10",
+  "updatedBy": "human"
+}

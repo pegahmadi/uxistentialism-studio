@@ -1,0 +1,20 @@
+{
+  "_comment": "The Studio Workspace — your active thinking context across the six environments. Studio-LOCAL state, committed to this repo. NOT an Obsidian mirror and never written back to the vault. Keep it public-safe: pointers and short notes only — NO absolute paths, NO vault/manuscript bodies, NO secrets. Every field is optional except schemaVersion; the app degrades gracefully when a field is missing. Copy this to workspace.json and edit by hand.",
+  "schemaVersion": 1,
+  "status": "active — one of: active | paused | resting",
+  "focus": "one short line: the through-line of your attention right now",
+  "activeManuscript": {
+    "id": "concept-or-idea-id",
+    "title": "Human-readable title",
+    "round": 3,
+    "venue": "Medium"
+  },
+  "reviewRound": 3,
+  "approvedFormationTopic": "an emerging term or concept id you've deliberately promoted",
+  "openQuestions": ["A question you are holding, in your own words"],
+  "paused": [{ "id": "concept-or-idea-id", "note": "why it's set down, briefly" }],
+  "todayNote": "optional short note to surface in Today",
+  "nextAction": "the one next meaningful action",
+  "updatedAt": "2026-07-10",
+  "updatedBy": "human — one of: human | claude"
+}

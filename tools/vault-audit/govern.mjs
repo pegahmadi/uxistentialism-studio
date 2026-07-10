@@ -295,7 +295,7 @@ async function main() {
   }
   if (graph.duplicates.length) {
     diagnostics.push(
-      `**A concept is fragmenting across locations.** ${graph.duplicates.map(([k, a]) => `“${a[0].title}” exists in ${a.length} places`).join("; ")} — a single idea splitting into duplicate homes.`,
+      `**A concept is fragmenting across locations.** ${graph.duplicates.map(([, a]) => `“${a[0].title}” exists in ${a.length} places`).join("; ")} — a single idea splitting into duplicate homes.`,
     );
   }
 

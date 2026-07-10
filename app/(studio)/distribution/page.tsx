@@ -1,43 +1,40 @@
 import { getMode } from "@/lib/modes";
 import { ModeHeader } from "@/components/studio/ModeHeader";
-import { ideasInMode } from "@/lib/placeholder";
+import { writingInMode, productsInMode } from "@/lib/content";
+import { WritingCard } from "@/components/ui/WritingCard";
+import { ProductCard } from "@/components/ui/ProductCard";
 
 const mode = getMode("distribution")!;
 
-// Illustrative only — nothing here publishes anywhere.
-const CHANNELS = ["Essay", "Newsletter", "Talk", "Thread"];
-
 export default function DistributionPage() {
-  const ideas = ideasInMode("distribution");
+  const writing = writingInMode("distribution");
+  const products = productsInMode("distribution");
+
   return (
     <div>
       <ModeHeader mode={mode} />
-      <section className="flex flex-col gap-6">
-        {ideas.map((idea) => (
-          <article
-            key={idea.id}
-            className="rounded-lg border border-line p-5"
-          >
-            <h3 className="font-serif text-xl text-ink">{idea.title}</h3>
-            <p className="mt-2 text-sm leading-relaxed text-muted">
-              {idea.thesis}
-            </p>
-            <div className="mt-4 flex flex-wrap gap-2">
-              {CHANNELS.map((c) => (
-                <span
-                  key={c}
-                  className="rounded-full border border-line px-3 py-1 text-xs text-muted"
-                >
-                  {c}
-                </span>
-              ))}
-            </div>
-          </article>
-        ))}
-        <p className="mt-2 text-xs text-muted">
-          Channels are illustrative — no publishing is wired up.
-        </p>
+
+      <section className="mb-14">
+        <h2 className="mb-4 text-xs uppercase tracking-[0.18em] text-muted">Writing</h2>
+        <div className="grid gap-4 sm:grid-cols-2">
+          {writing.map((w) => (
+            <WritingCard key={w.id} writing={w} />
+          ))}
+        </div>
       </section>
+
+      <section className="mb-8">
+        <h2 className="mb-4 text-xs uppercase tracking-[0.18em] text-muted">Products</h2>
+        <div className="grid gap-4">
+          {products.map((p) => (
+            <ProductCard key={p.id} product={p} />
+          ))}
+        </div>
+      </section>
+
+      <p className="text-xs text-muted">
+        Nothing here publishes anywhere — Distribution is a view, not an integration.
+      </p>
     </div>
   );
 }

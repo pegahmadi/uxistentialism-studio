@@ -1,4 +1,4 @@
-import type { Idea } from "@/lib/placeholder";
+import type { Idea } from "@/lib/content";
 import { getMode } from "@/lib/modes";
 
 // The Idea is the primary object, so it gets a first-class component. The

@@ -450,6 +450,16 @@ and must be surfaced as an error, not silently retried.
 - forbidden keys at any depth: `body`, `transcript`, `vaultKey`, `path`,
   `relPath`, `folder`, `fileName`, `fileBase`, `mtime`, `mtimeMs`, `birthtime`
 
+Path detection covers paths wrapped in punctuation, quotes, assignments, and
+markdown links (e.g. `(/home/x/y)`, `"\/var\/x\/y"`, `path=/tmp/x/y`,
+`[link](/home/x/y)`, `C:/Users/x/y`) while still permitting `https://` URLs,
+ISO timestamps, ratios, and ordinary slash punctuation (`read/write`).
+
+**Violation reports are redacted:** a violation names only the category and
+the JSON trail (e.g. `path-like string detected at $.concepts[0].summary`) —
+never the offending value — so error responses and logs cannot re-leak the
+content they rejected.
+
 The reference implementation is `tools/public-safety.mjs` (coordinator-owned
 shared infrastructure), locked by `tools/tests/public-safety.test.mjs`. Both
 ingestion endpoints, the companion's local validation, and the fixture

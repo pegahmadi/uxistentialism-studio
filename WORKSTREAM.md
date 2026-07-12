@@ -246,3 +246,64 @@ Before marking WS-1 complete and requesting merge:
   endpoints following the same pattern; those are not in WS-1 scope
 - The `[STUDIO_URL]` placeholder in `CLAUDE.md` must be filled before testing
   WS-2 against the deployed WS-1 endpoint
+
+---
+
+## Coordinator Amendment — contract v1.1.0 (2026-07-12)
+
+*Added under the documented coordinator exception (see CLAUDE.md ownership
+table) after an independent audit and human-approved rulings. Where this
+section conflicts with anything above, **this section and
+`docs/INGESTION_CONTRACT.md` v1.1.0 govern.** Re-read the full contract before
+replanning.*
+
+1. **Atomic writes (§6).** Replace the read-check-backup-write sequence in the
+   original steps with a single Redis `EVAL` (Lua) compare-and-set per
+   ingestion write, operating on `{key}`, `{key}-meta`, `{key}-prev` in one
+   atomic execution. No read-then-write in application code. On `idempotent`,
+   the script refreshes only the server-owned `lastSuccessfulSync` heartbeat.
+   Your implementation must satisfy the state machine locked by
+   `tools/tests/contract-freshness.test.mjs`.
+2. **Substantive hashing (§1b).** The server recomputes the payload hash from
+   received `data` using `tools/canonical-hash.mjs` (import it; do not
+   re-implement) — top-level `data.generatedAt` is excluded. Mismatch with the
+   asserted `payloadHash` → 400 `invalid_schema`. Use the recomputed hash for
+   comparison and storage.
+3. **Timestamps (§1).** Validate the exact `Date.toISOString()` format
+   (regex), convert to epoch ms, compare numerically.
+4. **Auth (§3).** Length-safe constant-time comparison: validate header shape,
+   handle unequal-length buffers without `timingSafeEqual` throwing, identical
+   401 for every credential failure.
+5. **Body size (§4).** Enforce actual received bytes (bounded read), not just
+   the `Content-Length` header; reject malformed/negative declared lengths.
+6. **Redis client.** Replace step 2's module-level `Redis.fromEnv()` with a
+   lazy, guarded, server-only accessor. Missing/malformed Redis config is an
+   explicit fallback condition — never a crashed import. Pages must render
+   from fixtures with no Redis env vars.
+7. **Snapshot rule (§8).** One `DataResult<T>` snapshot per data source per
+   request; derive concepts/graph/details/emerging from that single snapshot
+   with one metadata read. Audit every call site — module-scope reads (e.g. in
+   the Memory page) move inside request-time functions.
+8. **Workspace = Option A.** `lib/workspace.ts` keeps its fixture/default read
+   path wrapped in `DataResult` (`source: "fallback" | "default"`). Do NOT
+   read Workspace from Redis; the inferred/override merge is WS-4 scope.
+9. **Editorial Board authority rule (§2b).** The ingestion endpoint rejects
+   every non-empty `rulings` array **regardless of `updatedBy`** (400).
+   `updatedBy` is provenance, never authorization. The Iteration UI must
+   render live board content as advice only; rulings may render as human
+   decisions only from the human-curated committed fixture.
+10. **Sync-status (§2e).** GET-only, `force-dynamic`, `no-store`; Redis
+    unreachable → 200 with `degraded: true` and null values (never 5xx, never
+    internal detail); never-synced is distinguishable from status-unavailable.
+11. **Schema version (§12).** Accept exactly `schemaVersion: 1`; reject all
+    other values with 400.
+12. **Shared infra is read-only for you:** `tools/canonical-hash.mjs`,
+    `tools/vault-audit/_shared.mjs`, `integrations/` — import, never modify.
+
+**Added verification gates (before WS-1 merge):** unit tests for strict
+validation, auth edge cases (incl. unequal-length tokens), actual-byte size
+enforcement, hash mismatch, idempotent/stale/duplicate outcomes; a concurrency
+test demonstrating an older request cannot overwrite a newer one; fallback
+rendering with Redis absent, visibly labeled; invalid/missing metadata never
+appears fresh; no live-data route statically prerendered; both contract test
+suites in `tools/tests/` pass.

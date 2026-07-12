@@ -48,14 +48,13 @@ test("schemaVersion must be exactly 1 (§12)", async () => {
   }
 });
 
-test("source outside the §1 enum → 400; enum values pass", async () => {
+test("source outside the §1 enum → 400; the endpoint-bound value passes (v1.1.2)", async () => {
   for (const v of ["vault", "COMPANION", "", 3]) {
     await expect400(envelope(obsidianData(), { source: v }), `source ${JSON.stringify(v)}`);
   }
-  for (const v of ["companion", "editorial-board-inbox", "studio-ui"]) {
-    const r = await submit({ payload: envelope(obsidianData(), { source: v }) });
-    assert.equal(r.status, 200, v);
-  }
+  // In-enum values are bound per endpoint — full matrix in endpoint-binding.test.mjs.
+  const r = await submit({ payload: envelope(obsidianData(), { source: "companion" }) });
+  assert.equal(r.status, 200);
 });
 
 test("timestamps must be EXACT Date.toISOString() format (§1)", async () => {

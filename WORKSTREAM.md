@@ -242,3 +242,69 @@ Before marking WS-2 complete:
   `CLAUDE.md` once the production URL is confirmed).
 - `STUDIO_SYNC_SECRET` must match between `~/.config/uxistentialism-studio/config.json`
   and the Vercel `STUDIO_SYNC_SECRET` environment variable.
+
+---
+
+## Coordinator Amendment — contract v1.1.0 (2026-07-12)
+
+*Added under the documented coordinator exception (see CLAUDE.md ownership
+table) after an independent audit and human-approved rulings. Where this
+section conflicts with anything above, **this section and
+`docs/INGESTION_CONTRACT.md` v1.1.0 govern.** Re-read the full contract before
+replanning.*
+
+1. **Use the pure projector.** `integrations/obsidian/project.mjs` now exports
+   `project({ vaultPath, allowlistPath?, skipFolders? })` returning
+   `{ data: { generatedAt, concepts, connections, emerging }, sourceUpdatedAt,
+   missing }`. It throws (`VaultError`) instead of exiting and **writes
+   nothing** — the original `projector.mjs` plan ("calls project.mjs as a
+   library") is now literally possible. Never write `data/projections/*.json`.
+   `sourceUpdatedAt` comes from the projector (newest mtime among all scanned
+   notes); do not compute it yourself. `skipFolders` is additive — safety
+   defaults are always preserved.
+2. **You own the complete transport envelope for BOTH endpoints** —
+   `schemaVersion`, `source`, `sourceUpdatedAt`, `projectedAt`, `revision`,
+   `payloadHash` — including inbox submissions. Inbox artifacts arrive as
+   **data-only** (plus a source-event timestamp); validate the data, then
+   construct the canonical envelope yourself. Maintain **separate persisted
+   revision sequences** for `obsidian-projection` and `editorial-board` in
+   status.json, written **atomically** (temp file + rename, restrictive mode)
+   so a crash cannot corrupt or roll back revision state.
+3. **Hashing (§1b).** Compute `payloadHash` with `tools/canonical-hash.mjs`
+   (`substantiveHash`) — import it; do not re-implement. Top-level
+   `data.generatedAt` is excluded, so reprojections of an unchanged vault are
+   idempotent by design.
+4. **Timestamps (§1).** Exact `Date.toISOString()` format everywhere.
+5. **Response semantics (§6).** 200 `idempotent` is SUCCESS — update
+   `lastSuccess` normally (the server refreshed its heartbeat). 409
+   `stale_payload` / 409 `duplicate` are NON-retryable conflicts: do not
+   retry the same payload, do not record `lastSuccess`, surface visibly in
+   status, and recover the sequence from the response's `storedRevision`
+   (next submission uses `storedRevision + 1` with a fresh projection).
+   Replace the original brief's "409 (stale/idempotent)" wording with these
+   semantics.
+6. **Startup inbox drain.** On startup, enumerate existing inbox files and
+   process them deterministically oldest-first, serialized (preserves
+   monotonic revisions). One invalid file must not block later valid files.
+   Handle duplicate and partially-written files; wait for file-size stability
+   before reading a newly created file.
+7. **Permissions.** Refuse to start if the secret-bearing config is not mode
+   600 (or explicitly repair permissions during install — pick one and
+   document it). Create and verify `~/.studio-inbox/` and its `rejected/`
+   subdirectory with mode 700. Logs must never serialize config, headers,
+   secrets, or private paths.
+8. **Path safety.** Resolve and normalize all configured paths; ensure every
+   scanned file stays inside the configured vault root (defend against
+   symlink escapes); the allowlist remains the projection privacy boundary;
+   no source path ever appears in a payload.
+9. **No direct-POST fallback exists for board sessions** (CLAUDE.md): if you
+   are offline, inbox artifacts wait and are drained on restart.
+10. **Shared infra is read-only for you:** `integrations/obsidian/project.mjs`,
+    `tools/canonical-hash.mjs`, `tools/vault-audit/_shared.mjs`,
+    `tools/validate-projection.mjs` — import, never modify.
+
+**Added verification gates (before WS-2 merge):** projector runs without
+writing committed JSON; debounce/single-flight tested; revision persistence
+survives restart; status writes atomic; startup drain works (incl. partial and
+invalid files → rejected/); secrets never in logs; config/inbox permissions
+verified; network failure leaves recoverable work.

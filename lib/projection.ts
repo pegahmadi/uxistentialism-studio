@@ -1,10 +1,17 @@
-// Reads the sanitized Obsidian projection (data/projections/obsidian.json) and
-// exposes it to the app — falling back to the hand-curated lib/content.ts when
-// the projection is absent. Server-only (uses fs); the projection is read at
-// build time, so production never touches the live vault.
+// Obsidian projection reader — request-time Upstash Redis primary path with the
+// committed fixture (data/projections/obsidian.json) as fallback and the
+// hand-curated lib/content.ts as the final default (contract §8).
+//
+// Snapshot rule (§8): pages load ONE ProjectionResult per request via
+// getProjection() and derive every view (graph, details, concepts, emerging)
+// from that single snapshot with pure functions. No module-scope reads.
+//
+// Server-only. lib readers only GET from Redis; they never write.
 
 import fs from "node:fs";
 import path from "node:path";
+import { getRedis } from "@/lib/redis";
+import { isStale, type DataResult } from "@/lib/data-result";
 import {
   IDEAS,
   GRAPH_NODES,
@@ -27,26 +34,86 @@ interface ProjectionConcept {
   presentIn: string[];
   backlinks: number;
 }
-interface Projection {
+export interface Projection {
   generatedAt: string;
   concepts: ProjectionConcept[];
   connections: { from: string; to: string }[];
   emerging: { term: string; references: number }[];
 }
 
-function loadProjection(): Projection | null {
+export type ProjectionResult = DataResult<Projection | null>;
+
+// Readers select the fields they know and tolerate unknown fixture fields (§12);
+// a projection without concepts is unusable and treated as absent.
+function usable(raw: unknown): Projection | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const j = raw as Projection;
+  return Array.isArray(j.concepts) && j.concepts.length ? j : null;
+}
+
+function readFixture(): Projection | null {
   try {
     const p = path.join(process.cwd(), "data", "projections", "obsidian.json");
     if (!fs.existsSync(p)) return null;
-    const j = JSON.parse(fs.readFileSync(p, "utf8")) as Projection;
-    return j?.concepts?.length ? j : null;
+    return usable(JSON.parse(fs.readFileSync(p, "utf8")));
   } catch {
     return null;
   }
 }
 
-export function projectionSource(): "vault" | "curated" {
-  return loadProjection() ? "vault" : "curated";
+function fixtureResult(error: string | null): ProjectionResult {
+  const fixture = readFixture();
+  if (fixture) return { data: fixture, source: "fallback", lastSuccessfulSync: null, stale: true, error };
+  return { data: null, source: "default", lastSuccessfulSync: null, stale: true, error };
+}
+
+/**
+ * The one snapshot per request (§8): Redis primary, fixture fallback, curated
+ * default. One data read + one metadata read; never throws.
+ */
+export async function getProjection(): Promise<ProjectionResult> {
+  const redis = getRedis();
+  if (!redis) return fixtureResult(null); // unconfigured Redis is an explicit fallback condition
+
+  let rawData: unknown;
+  let rawMeta: unknown;
+  try {
+    [rawData, rawMeta] = await Promise.all([
+      redis.get("obsidian-projection"),
+      redis.get("obsidian-projection-meta"),
+    ]);
+  } catch {
+    return fixtureResult("redis_unreachable");
+  }
+
+  if (typeof rawData === "string" && rawData.length) {
+    try {
+      const data = usable(JSON.parse(rawData));
+      if (data) {
+        let lastSuccessfulSync: string | null = null;
+        if (typeof rawMeta === "string" && rawMeta.length) {
+          try {
+            const meta: unknown = JSON.parse(rawMeta);
+            if (meta && typeof meta === "object") {
+              const v = (meta as Record<string, unknown>).lastSuccessfulSync;
+              if (typeof v === "string") lastSuccessfulSync = v;
+            }
+          } catch {
+            /* missing/invalid metadata must never appear fresh — stays null */
+          }
+        }
+        return { data, source: "live", lastSuccessfulSync, stale: isStale(lastSuccessfulSync), error: null };
+      }
+    } catch {
+      return fixtureResult("malformed_live_data");
+    }
+  }
+  return fixtureResult(null); // reachable Redis, key absent → fixture
+}
+
+/** "vault" when a projection (live or fixture) is present; "curated" otherwise. */
+export function projectionSource(result: ProjectionResult): "vault" | "curated" {
+  return result.data ? "vault" : "curated";
 }
 
 export interface GraphModel {
@@ -56,8 +123,8 @@ export interface GraphModel {
 
 // Concept nodes/edges come from the vault projection when present; the peripheral
 // nodes (signals, product, essays, questions) always come from curated content.
-export function getGraph(): GraphModel {
-  const proj = loadProjection();
+export function getGraph(result: ProjectionResult): GraphModel {
+  const proj = result.data;
   const conceptNodes: GraphNode[] = proj
     ? proj.concepts.map((c) => ({ id: c.id, label: c.title, kind: "concept" as NodeKind }))
     : IDEAS.map((i) => ({ id: i.id, label: i.title, kind: "concept" as NodeKind }));
@@ -89,8 +156,8 @@ export function getGraph(): GraphModel {
 
 export type NodeDetail = { stat: string; body: string; links: string };
 
-export function getGraphDetails(): Record<string, NodeDetail> {
-  const proj = loadProjection();
+export function getGraphDetails(result: ProjectionResult): Record<string, NodeDetail> {
+  const proj = result.data;
   const out: Record<string, NodeDetail> = {};
 
   if (proj) {
@@ -118,8 +185,8 @@ export function getGraphDetails(): Record<string, NodeDetail> {
   return out;
 }
 
-export function getEmerging(): { term: string; references: number }[] {
-  return loadProjection()?.emerging ?? [];
+export function getEmerging(result: ProjectionResult): { term: string; references: number }[] {
+  return result.data?.emerging ?? [];
 }
 
 export interface ConceptView {
@@ -131,8 +198,8 @@ export interface ConceptView {
   source: "vault" | "curated";
 }
 
-export function getConcepts(): ConceptView[] {
-  const proj = loadProjection();
+export function getConcepts(result: ProjectionResult): ConceptView[] {
+  const proj = result.data;
   if (proj) {
     return proj.concepts.map((c) => ({
       id: c.id,
@@ -146,6 +213,6 @@ export function getConcepts(): ConceptView[] {
   return IDEAS.map((i) => ({ id: i.id, title: i.title, summary: i.thesis, backlinks: 0, presentIn: i.presentIn, source: "curated" }));
 }
 
-export function getConcept(id: string): ConceptView | null {
-  return getConcepts().find((c) => c.id === id) ?? null;
+export function getConcept(result: ProjectionResult, id: string): ConceptView | null {
+  return getConcepts(result).find((c) => c.id === id) ?? null;
 }

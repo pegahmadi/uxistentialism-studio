@@ -4,12 +4,18 @@
 // deliberate operational pointers (never manuscript bodies, vault content, absolute
 // paths, or secrets).
 //
+// WS-1 boundary (Option A, contract §8): the Workspace does NOT read from Redis.
+// It keeps its fixture/default read path, wrapped in DataResult with honest
+// source: "fallback" | "default". The workspace-inferred / workspace-override
+// Redis merge is WS-4 scope; no workspace Redis key may be introduced here.
+//
 // Server-only (uses fs). Every field is optional except schemaVersion; the reader
 // degrades gracefully when the file is absent, partial, or malformed — it never
 // throws, always returning a fully-shaped Workspace so callers need no guards.
 
 import fs from "node:fs";
 import path from "node:path";
+import type { DataResult } from "@/lib/data-result";
 
 export const WORKSPACE_SCHEMA_VERSION = 1;
 
@@ -111,17 +117,38 @@ function workspacePath(): string {
   return path.join(process.cwd(), "data", "studio", "workspace.json");
 }
 
-/** Read + normalize the workspace. Never throws; falls back to a safe default. */
-export function getWorkspace(): Workspace {
+export type WorkspaceResult = DataResult<Workspace>;
+
+/**
+ * Read + normalize the workspace, wrapped in DataResult (Option A: fixture or
+ * default only — never Redis in WS-1). Never throws.
+ *   source "fallback" — the committed file was present and parsed
+ *   source "default"  — file absent/malformed; built-in empty default
+ * lastSuccessfulSync is null and stale is true by definition: the Workspace is
+ * not a synced source in v1, and it must never appear fresh.
+ */
+export async function getWorkspace(): Promise<WorkspaceResult> {
+  const workspace = readWorkspaceFile();
+  return {
+    data: workspace ?? emptyWorkspace(),
+    source: workspace ? "fallback" : "default",
+    lastSuccessfulSync: null,
+    stale: true,
+    error: null,
+  };
+}
+
+/** Read + normalize the workspace file. Returns null when absent or unusable. */
+function readWorkspaceFile(): Workspace | null {
   let raw: unknown;
   try {
     const p = workspacePath();
-    if (!fs.existsSync(p)) return emptyWorkspace();
+    if (!fs.existsSync(p)) return null;
     raw = JSON.parse(fs.readFileSync(p, "utf8"));
   } catch {
-    return emptyWorkspace();
+    return null;
   }
-  if (!raw || typeof raw !== "object") return emptyWorkspace();
+  if (!raw || typeof raw !== "object") return null;
   const o = raw as Record<string, unknown>;
 
   return {
@@ -140,11 +167,7 @@ export function getWorkspace(): Workspace {
   };
 }
 
-/** Whether a real workspace file is present (vs. the built-in empty default). */
-export function workspaceSource(): "file" | "default" {
-  try {
-    return fs.existsSync(workspacePath()) ? "file" : "default";
-  } catch {
-    return "default";
-  }
+/** Whether a real workspace file backed this result (vs. the built-in default). */
+export function workspaceSource(result: WorkspaceResult): "file" | "default" {
+  return result.source === "fallback" ? "file" : "default";
 }

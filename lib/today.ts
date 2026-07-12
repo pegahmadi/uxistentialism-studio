@@ -17,9 +17,10 @@
 //     coherent briefing from curated content — never nulls or implementation talk.
 
 import { getWorkspace, workspaceSource } from "./workspace";
-import { getConcepts, getEmerging, projectionSource } from "./projection";
+import { getConcepts, getEmerging, getProjection, projectionSource } from "./projection";
 import { getEditorialBoard } from "./editorial-board";
 import { QUESTIONS, IDEAS, SIGNALS } from "./content";
+import type { DataSource } from "./data-result";
 
 export const TODAY_QUESTION = "What deserves my attention today?";
 
@@ -55,6 +56,13 @@ export interface BriefingItem {
   evidence: Evidence[];
 }
 
+/** Data-layer provenance for one synced source (contract §8) — shown by the UI. */
+export interface SyncProvenance {
+  source: DataSource;
+  lastSuccessfulSync: string | null;
+  stale: boolean;
+}
+
 export interface TodayBriefing {
   question: string;
   focus: BriefingItem | null;
@@ -63,6 +71,8 @@ export interface TodayBriefing {
   action: BriefingItem | null;
   note: BriefingItem | null;
   sources: { workspace: "file" | "default"; projection: "vault" | "curated"; board: "editorial-board" | "none" };
+  /** live / fallback / stale indicators per data source — never silently degraded. */
+  provenance: { projection: SyncProvenance; board: SyncProvenance };
   updated: { at: string; by: string | null } | null;
 }
 
@@ -88,17 +98,20 @@ function formationStatus(references: number): Evidence {
   );
 }
 
-export function getTodayBriefing(): TodayBriefing {
-  const w = getWorkspace();
-  const hasVault = projectionSource() === "vault";
-  const emerging = [...getEmerging()].sort((a, b) => b.references - a.references);
-  const concepts = [...getConcepts()].sort((a, b) => b.backlinks - a.backlinks);
+export async function getTodayBriefing(): Promise<TodayBriefing> {
+  // Snapshot rule (§8): one DataResult per source per request; every view below
+  // is a pure derivation over these three snapshots.
+  const [wRes, projection, boardRes] = await Promise.all([getWorkspace(), getProjection(), getEditorialBoard()]);
+  const w = wRes.data;
+  const hasVault = projectionSource(projection) === "vault";
+  const emerging = [...getEmerging(projection)].sort((a, b) => b.references - a.references);
+  const concepts = [...getConcepts(projection)].sort((a, b) => b.backlinks - a.backlinks);
 
   // Today reads the Editorial Board projection ONLY to detect whether the active
   // manuscript has an unresolved judgment — never to surface the judgment itself.
   // The decision stays in Iteration; Today just points there. (Boundary: Today
   // answers "what deserves attention", Iteration answers "what still needs judgment".)
-  const board = getEditorialBoard();
+  const board = boardRes.data;
   const activeKey = w.activeManuscript ? slugify(w.activeManuscript.id ?? w.activeManuscript.title ?? "") : "";
   const boardKey = board?.manuscript ? slugify(board.manuscript.id ?? board.manuscript.title ?? "") : "";
   const pendingJudgment =
@@ -254,7 +267,7 @@ export function getTodayBriefing(): TodayBriefing {
   const workspaceHasContent = Boolean(
     w.focus || w.activeManuscript || w.approvedFormationTopic || w.openQuestions.length || w.nextAction || w.todayNote || w.status || w.updatedAt,
   );
-  const workspaceState = workspaceSource() === "file" && workspaceHasContent ? "file" : "default";
+  const workspaceState = workspaceSource(wRes) === "file" && workspaceHasContent ? "file" : "default";
 
   return {
     question: TODAY_QUESTION,
@@ -263,7 +276,11 @@ export function getTodayBriefing(): TodayBriefing {
     openQuestion,
     action,
     note,
-    sources: { workspace: workspaceState, projection: projectionSource(), board: pendingJudgment ? "editorial-board" : "none" },
+    sources: { workspace: workspaceState, projection: projectionSource(projection), board: pendingJudgment ? "editorial-board" : "none" },
+    provenance: {
+      projection: { source: projection.source, lastSuccessfulSync: projection.lastSuccessfulSync, stale: projection.stale },
+      board: { source: boardRes.source, lastSuccessfulSync: boardRes.lastSuccessfulSync, stale: boardRes.stale },
+    },
     updated: workspaceState === "file" && w.updatedAt ? { at: w.updatedAt, by: w.updatedBy } : null,
   };
 }

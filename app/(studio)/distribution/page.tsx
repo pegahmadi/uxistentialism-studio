@@ -1,6 +1,10 @@
 import { getMode } from "@/lib/modes";
 import { writingInMode } from "@/lib/content";
 
+// All six Studio environments render dynamically (live-data layer). Distribution
+// reads only curated content in v1, but stays on the same request-time path.
+export const dynamic = "force-dynamic";
+
 const mode = getMode("distribution")!;
 const writing = writingInMode("distribution");
 

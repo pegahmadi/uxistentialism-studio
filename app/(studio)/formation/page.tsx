@@ -1,11 +1,23 @@
 import { getMode } from "@/lib/modes";
 import { FormationTopic } from "@/components/studio/FormationTopic";
-import { getEmerging } from "@/lib/projection";
+import { getEmerging, getProjection } from "@/lib/projection";
+
+export const dynamic = "force-dynamic";
 
 const mode = getMode("formation")!;
 
-export default function FormationPage() {
-  const emerging = getEmerging();
+export default async function FormationPage() {
+  // Snapshot rule (§8): one projection snapshot per request.
+  const projection = await getProjection();
+  const emerging = getEmerging(projection);
+  const emergingProvenance =
+    projection.source === "live"
+      ? projection.stale || !projection.lastSuccessfulSync
+        ? "from the vault · live · stale"
+        : "from the vault · live"
+      : projection.source === "fallback"
+        ? "from the vault · fixture"
+        : "curated";
   return (
     <div className="mx-auto flex max-w-[680px] flex-col gap-[30px] px-9 pb-[72px] pt-[84px]">
       <div>
@@ -48,8 +60,10 @@ export default function FormationPage() {
       <FormationTopic />
 
       <div className="border border-line bg-surface px-5 py-4">
-        <div className="font-mono text-[11px] font-semibold tracking-[0.08em] text-faint">
-          STILL FORMING · REFERENCED BUT NOT YET WRITTEN
+        <div className="flex flex-wrap items-baseline gap-2 font-mono text-[11px] font-semibold tracking-[0.08em] text-faint">
+          <span>STILL FORMING · REFERENCED BUT NOT YET WRITTEN</span>
+          {/* data-layer provenance — live / fixture / stale, never silent (§8) */}
+          <span className="font-normal normal-case text-line2">· {emergingProvenance}</span>
         </div>
         {emerging.length > 0 ? (
           <ul className="mt-3 flex flex-col gap-1.5 text-[14px] leading-[1.6] text-muted">

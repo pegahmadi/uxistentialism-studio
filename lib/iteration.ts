@@ -20,6 +20,7 @@
 import { getWorkspace, workspaceSource } from "./workspace";
 import { getEditorialBoard, boardSource, type Confidence } from "./editorial-board";
 import { IDEAS } from "./content";
+import type { DataSource } from "./data-result";
 
 export const ITERATION_QUESTION = "What still needs judgment?";
 
@@ -64,6 +65,8 @@ export interface IterationView {
   nextDecision: { text: string; evidence: Evidence[] } | null;
   pastRounds: string[];
   sources: { workspace: "file" | "default"; board: "projection" | "none" };
+  /** Data-layer provenance for the board snapshot (§8) — live / fallback / stale. */
+  boardProvenance: { source: DataSource; lastSuccessfulSync: string | null; stale: boolean };
 }
 
 const REVIEWER_GLYPHS = ["▦", "❧", "◈", "⁙", "◇"];
@@ -95,15 +98,17 @@ function boardStance(reviewers: { recommendation: string | null }[]): { stance: 
   return { stance: "convergent", summary: "The board converges — the recommendations agree." };
 }
 
-export function getIterationView(): IterationView {
-  const w = getWorkspace();
-  const board = getEditorialBoard();
+export async function getIterationView(): Promise<IterationView> {
+  // Snapshot rule (§8): one DataResult per source per request.
+  const [wRes, boardRes] = await Promise.all([getWorkspace(), getEditorialBoard()]);
+  const w = wRes.data;
+  const board = boardRes.data;
   const wm = w.activeManuscript;
 
   const workspaceHasContent = Boolean(
     w.focus || w.activeManuscript || w.approvedFormationTopic || w.openQuestions.length || w.nextAction || w.todayNote || w.status || w.updatedAt,
   );
-  const workspaceState: "file" | "default" = workspaceSource() === "file" && workspaceHasContent ? "file" : "default";
+  const workspaceState: "file" | "default" = workspaceSource(wRes) === "file" && workspaceHasContent ? "file" : "default";
 
   // Curated fallback manuscript — the piece Iteration has always shown.
   const curatedIdea = IDEAS.find((i) => i.id === (wm?.id ?? board?.manuscript?.id ?? "authority-architecture")) ?? IDEAS.find((i) => i.presentIn.includes("iteration")) ?? IDEAS[0];
@@ -153,7 +158,15 @@ export function getIterationView(): IterationView {
   const boardEvidence: Evidence[] = [board ? ev("board", "Projected from Editorial Board", board.sourceLabel ?? undefined) : ev("curated", "Curated")];
 
   // ---- RULINGS — human decisions, kept distinct from recommendations ----
-  const rulingItems: RulingView[] = board ? board.rulings.map((r) => ({ on: r.on, decision: r.decision })) : CURATED_BOARD.rulings;
+  // v1 authority rule (§2b): rulings render as human decisions only from the
+  // human-curated committed fixture. Live board content is advice; the reader
+  // already strips live rulings, and this guard keeps the rule visible here.
+  const rulingItems: RulingView[] =
+    board && boardRes.source !== "live"
+      ? board.rulings.map((r) => ({ on: r.on, decision: r.decision }))
+      : board
+        ? []
+        : CURATED_BOARD.rulings;
   const rulings = { items: rulingItems, evidence: [board ? ev("board", "Projected from Editorial Board") : ev("curated", "Curated")] };
 
   // ---- NEXT HUMAN DECISION ----
@@ -173,6 +186,7 @@ export function getIterationView(): IterationView {
     rulings,
     nextDecision,
     pastRounds,
-    sources: { workspace: workspaceState, board: boardSource() },
+    sources: { workspace: workspaceState, board: boardSource(boardRes) },
+    boardProvenance: { source: boardRes.source, lastSuccessfulSync: boardRes.lastSuccessfulSync, stale: boardRes.stale },
   };
 }

@@ -1,5 +1,7 @@
 import { getIterationView, type Evidence } from "@/lib/iteration";
 
+export const dynamic = "force-dynamic";
+
 // Structured provenance in the same restrained mono language used across the Studio.
 // Authored (Workspace) reads a shade stronger than projected/curated.
 function Provenance({ evidence }: { evidence: Evidence[] }) {
@@ -19,10 +21,24 @@ function Provenance({ evidence }: { evidence: Evidence[] }) {
   );
 }
 
-export default function IterationPage() {
-  const v = getIterationView();
+export default async function IterationPage() {
+  const v = await getIterationView();
   const m = v.manuscript;
   const meta = [m.venue, m.status].filter(Boolean).join(" · ");
+
+  // Data-layer provenance (§8) in the same restrained mono language: live board
+  // data names its last sync; fixture data says so plainly; stale never hides.
+  const bp = v.boardProvenance;
+  const boardProvenanceLine =
+    bp.source === "live"
+      ? !bp.lastSuccessfulSync
+        ? "board · live · sync time unknown · stale"
+        : bp.stale
+          ? `board · live · stale · last synced ${bp.lastSuccessfulSync}`
+          : `board · live · synced ${bp.lastSuccessfulSync}`
+      : bp.source === "fallback"
+        ? "board · fixture"
+        : "board · curated";
 
   return (
     <div className="flex items-start justify-center gap-12 px-10 pb-[72px] pt-[72px]">
@@ -143,6 +159,9 @@ export default function IterationPage() {
             </ol>
           </div>
         )}
+
+        {/* data-layer provenance — live / fixture / stale, never silent (§8) */}
+        <div className="font-mono text-[10px] tracking-[0.06em] text-faint">{boardProvenanceLine}</div>
 
         <div className="pt-1 font-mono text-[12px] tracking-[0.01em] text-faint">
           evidence · revision plan · past rounds — ⌘K

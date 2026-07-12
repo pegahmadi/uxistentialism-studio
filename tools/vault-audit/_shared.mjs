@@ -216,12 +216,17 @@ export function analyze(content) {
  * Library variant: load all vault notes from an explicit vaultPath. Read-only.
  * Throws VaultError on an unusable vault; never exits the process.
  *
+ * `skipFolders` is ADDITIVE: caller-provided exclusions are merged with the
+ * safety defaults (DEFAULT_SKIP) and deduplicated — supplying custom exclusions
+ * never removes defaults like Templates or node_modules.
+ *
  * Note objects contain paths, bodies, and mtimes for INTERNAL use only — callers
  * must never expose them in any public projection, payload, or log.
  */
-export async function loadNotesFrom({ vaultPath, skipFolders = DEFAULT_SKIP } = {}) {
+export async function loadNotesFrom({ vaultPath, skipFolders } = {}) {
   const root = resolveVaultPath(vaultPath);
-  const files = await walk(root, skipFolders);
+  const skip = Array.from(new Set([...DEFAULT_SKIP, ...(skipFolders ?? [])]));
+  const files = await walk(root, skip);
   const notes = [];
   for (const file of files) {
     let content = "";

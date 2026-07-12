@@ -382,9 +382,13 @@ Upstash REST and exposed as `.eval()` in `@upstash/redis` — invoked with keys
 
 1. reads the stored `revision`, `projectedAt` (epoch ms), and `payloadHash`
    from `{key}-meta`;
-2. returns `idempotent`, `stale`, or `duplicate` when the corresponding
-   condition below holds (no mutation);
-3. otherwise copies the current `{key}` value to `{key}-prev` and writes the
+2. on `idempotent` (recomputed hash matches stored hash): atomically refreshes
+   the server-owned `lastSuccessfulSync` heartbeat in `{key}-meta` to server
+   time, leaving the stored data, `payloadHash`, `sourceUpdatedAt`,
+   `projectedAt`, `revision`, and `{key}-prev` unchanged, then returns
+   `idempotent`;
+3. on `stale` or `duplicate`: returns without any mutation;
+4. otherwise copies the current `{key}` value to `{key}-prev` and writes the
    new data and meta **together**, then returns `accepted`.
 
 Timestamps are validated against the exact format in §1 and converted to
@@ -393,10 +397,23 @@ comparisons are numeric. The hash used is the server's recomputed hash (§1b).
 
 | Condition (evaluated atomically) | Result | HTTP response |
 |---|---|---|
-| Recomputed hash matches stored hash | No write. Idempotent accept. | 200 `{ ok: true, status: "idempotent" }` |
+| Recomputed hash matches stored hash | No data write. **Heartbeat refresh only** (`lastSuccessfulSync` ← server time). | 200 `{ ok: true, status: "idempotent" }` |
 | Incoming `projectedAt` < stored `projectedAt` | No write. | 409 `{ error: "stale_payload", ... }` |
 | Incoming `revision` ≤ stored `revision` AND `projectedAt` ≠ stored | No write. | 409 `{ error: "duplicate", ... }` |
-| All checks pass | Backup + write data and meta together. | 200 `{ ok: true, status: "accepted" }` |
+| All checks pass | Backup + write data and meta together (`lastSuccessfulSync` ← server time). | 200 `{ ok: true, status: "accepted" }` |
+
+**Freshness rule.** `lastSuccessfulSync` means *the most recent successful
+synchronization — accepted or idempotent*. A fully authenticated, schema-valid,
+hash-valid idempotent submission proves the companion verified the current
+state, so it refreshes the heartbeat. Consequently, unchanged data that the
+companion reconciles every 6 hours **never becomes operationally stale**:
+`stale` signals lost connectivity, not lack of change. Data/source age and
+connectivity are distinct dimensions (§10): `sourceUpdatedAt` = age of the
+contributing vault state, `projectedAt` = when that projection was generated,
+`lastSuccessfulSync` = when the server most recently verified a valid companion
+submission. A contract-semantics test for this rule lives at
+`tools/tests/contract-freshness.test.mjs`; the WS-1 implementation must satisfy
+it.
 
 **Client semantics (companion):**
 
@@ -460,7 +477,9 @@ distinguishable from live data. Silent degradation is not permitted.
 
 `stale` threshold defaults to 24 hours. The companion's periodic reconciliation
 interval (default 6 hours) ensures the threshold is not reached under normal
-operation.
+operation — including when the vault is unchanged, because idempotent
+reconciliations refresh the `lastSuccessfulSync` heartbeat (§6). Staleness
+therefore indicates a connectivity problem, never merely an idle vault.
 
 **Client construction rule.** The Redis client must be a lazy, guarded,
 server-only accessor. Missing or malformed Redis configuration is an explicit
@@ -518,7 +537,7 @@ HTTP status codes:
 |---|---|---|
 | `sourceUpdatedAt` | Newest mtime among **every scanned (non-skipped) vault note** — not only allowlisted notes, because non-allowlisted notes contribute to backlink and emerging reference counts. A single timestamp; no note identities, paths, or per-note mtimes are exposed. If zero notes are scanned, the projector errors and nothing is submitted. For inbox artifacts, the source-event timestamp supplied with the data. | Companion (via the projector library) |
 | `projectedAt` | When the companion ran the projection and generated this payload | Companion |
-| `lastSuccessfulSync` | When the server last accepted and stored a payload | Server (in `{key}-meta`) |
+| `lastSuccessfulSync` | When the server most recently verified a valid companion submission — **accepted or idempotent** (heartbeat, §6) | Server (in `{key}-meta`) |
 | `stale` | Whether `lastSuccessfulSync` is more than 24h ago | `lib/*.ts` at read time |
 
 `lastSuccessfulSync` and `sourceUpdatedAt` are not the same. The UI should

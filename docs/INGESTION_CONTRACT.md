@@ -93,6 +93,23 @@ object:
 5. The canonical string is UTF-8 encoded before hashing.
 6. `payloadHash = "sha256-" + hex(SHA-256(bytes))`.
 
+**Substantive-hash exception.** The **top-level `data.generatedAt` field is
+excluded from the hash input** by both the companion and the server (the field
+itself remains required in the Obsidian payload). `generatedAt` is temporal
+metadata of a projection *run*; `payloadHash` means *identity of the
+substantive projection*. Without this exception every reprojection of an
+unchanged vault would produce a new hash and the idempotent path (§6) could
+never trigger for reconciliations. Only the top-level key is excluded — any
+nested field of the same name is hashed normally. (A future schema version may
+remove `generatedAt` from `data` entirely, since `projectedAt` already records
+projection time; it is retained in v1 for backward compatibility with
+`lib/projection.ts` and the committed fixture.)
+
+The reference implementation of canonicalization and the substantive hash is
+`tools/canonical-hash.mjs` (coordinator-owned shared infrastructure). WS-1 and
+WS-2 must use it — or match it exactly — so client and server hashing cannot
+drift. Its behavior is locked by `tools/tests/canonical-hash.test.mjs`.
+
 Values with no JSON representation — `undefined`, `NaN`, `Infinity`,
 `-Infinity`, functions, `BigInt`, circular references — are invalid anywhere in
 the payload and are rejected with 400 `invalid_schema` **before** hashing.
@@ -382,11 +399,12 @@ Upstash REST and exposed as `.eval()` in `@upstash/redis` — invoked with keys
 
 1. reads the stored `revision`, `projectedAt` (epoch ms), and `payloadHash`
    from `{key}-meta`;
-2. on `idempotent` (recomputed hash matches stored hash): atomically refreshes
-   the server-owned `lastSuccessfulSync` heartbeat in `{key}-meta` to server
-   time, leaving the stored data, `payloadHash`, `sourceUpdatedAt`,
-   `projectedAt`, `revision`, and `{key}-prev` unchanged, then returns
-   `idempotent`;
+2. on `idempotent` (recomputed **substantive** hash, §1b, matches stored hash):
+   atomically refreshes the server-owned `lastSuccessfulSync` heartbeat in
+   `{key}-meta` to server time, leaving the stored data (including its original
+   `generatedAt`), `payloadHash`, `sourceUpdatedAt`, `projectedAt`, `revision`,
+   and `{key}-prev` unchanged, then returns `idempotent` — the incoming run's
+   fresh `generatedAt`/`projectedAt` are discarded;
 3. on `stale` or `duplicate`: returns without any mutation;
 4. otherwise copies the current `{key}` value to `{key}-prev` and writes the
    new data and meta **together**, then returns `accepted`.
@@ -397,7 +415,7 @@ comparisons are numeric. The hash used is the server's recomputed hash (§1b).
 
 | Condition (evaluated atomically) | Result | HTTP response |
 |---|---|---|
-| Recomputed hash matches stored hash | No data write. **Heartbeat refresh only** (`lastSuccessfulSync` ← server time). | 200 `{ ok: true, status: "idempotent" }` |
+| Recomputed **substantive** hash (§1b) matches stored hash | No data write. **Heartbeat refresh only** (`lastSuccessfulSync` ← server time). | 200 `{ ok: true, status: "idempotent" }` |
 | Incoming `projectedAt` < stored `projectedAt` | No write. | 409 `{ error: "stale_payload", ... }` |
 | Incoming `revision` ≤ stored `revision` AND `projectedAt` ≠ stored | No write. | 409 `{ error: "duplicate", ... }` |
 | All checks pass | Backup + write data and meta together (`lastSuccessfulSync` ← server time). | 200 `{ ok: true, status: "accepted" }` |

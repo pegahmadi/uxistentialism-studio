@@ -64,6 +64,13 @@ Board updates do not require a Git commit, a push, or a redeployment.
 - Production URL: `[STUDIO_URL]` — replace this placeholder with the confirmed
   URL before WS-1 begins implementation.
 
+Deployment-state note (2026-07-12): local `main` is ahead of GitHub `main`,
+which does not yet contain this file or the ingestion contract. Before any
+deployed testing: confirm the **existing** Vercel project and its production
+URL and deploy branch (never create a second project), push the reviewed local
+`main`, connect Upstash through that project, set `STUDIO_SYNC_SECRET`, and
+verify the deployed commit is the intended WS-1 merge.
+
 ---
 
 ## What automated workers may do
@@ -96,7 +103,8 @@ Board updates do not require a Git commit, a push, or a redeployment.
 
 | Workstream | Branch | May modify or create |
 |---|---|---|
-| WS-0 | `ws/claude-md` | `CLAUDE.md`, `docs/INGESTION_CONTRACT.md` |
+| WS-0 | `ws/claude-md` (merged) | `CLAUDE.md`, `docs/INGESTION_CONTRACT.md` |
+| Coordinator | `ws/contract-amendments` | `CLAUDE.md`, `docs/INGESTION_CONTRACT.md`, shared infrastructure (`integrations/`, `tools/`), and — as a documented exception — `WORKSTREAM.md` briefs on the WS branches |
 | WS-1 | `ws/live-data` | `lib/`, `app/`, `package.json`, `next.config.ts` |
 | WS-2 | `ws/companion` | `companion/` |
 | WS-3 | `ws/editorial-board-output` | Editorial Board skill (external), `docs/EDITORIAL_BOARD_OUTPUT.md` |
@@ -104,6 +112,19 @@ Board updates do not require a Git commit, a push, or a redeployment.
 
 No workstream may modify files owned by another workstream without explicit
 cross-workstream coordination documented in both WORKSTREAM.md files.
+
+The reusable Obsidian projector (`integrations/obsidian/project.mjs` and the
+shared loader in `tools/vault-audit/_shared.mjs`) is **shared infrastructure**
+maintained by the Coordinator. Implementation workstreams import it; they never
+modify it. WS-2 calls the pure `project({ vaultPath })` function — which throws
+instead of exiting and writes nothing — and owns the full transport envelope
+(`schemaVersion`, `source`, `projectedAt`, `revision`, `payloadHash`) for every
+submission, including inbox artifacts.
+
+**Workspace boundary:** during WS-1, `lib/workspace.ts` keeps its
+fixture/default read path (honest `source: "fallback" | "default"` provenance).
+The `workspace-inferred` / `workspace-override` Redis merge is WS-4 scope; no
+other workspace Redis key may be introduced.
 
 ---
 
@@ -126,13 +147,21 @@ See `docs/INGESTION_CONTRACT.md` for full schemas.
 
 ## Public-safety rules
 
-The following must never appear in any Redis value, committed file, or log:
+The following must never appear in **runtime payloads, Redis values, public
+projection fixtures (`data/`), or logs**:
 
 - Note bodies or manuscript text
-- Vault file paths (`/Users/...`, `.md` filenames)
+- Private filesystem paths or source filenames (vault paths, `/Users/...`,
+  `.md` note filenames)
 - Private review transcripts
 - Credentials, tokens, or secrets
-- Absolute paths to any local filesystem
+
+Documentation examples, local configuration templates, and gitignored config
+files (e.g. `tools/vault-audit/audit.config.json`,
+`~/.config/uxistentialism-studio/config.json`) may reference local paths — they
+are operator documentation, not submitted intellectual data. The boundary is:
+nothing private travels in a payload, lands in Redis, sits in a public fixture,
+or is written to a log.
 
 The projection generator (`integrations/obsidian/project.mjs`) and the validator
 (`tools/validate-projection.mjs`) enforce these rules locally. The ingestion
@@ -175,7 +204,18 @@ The UXistentialism Editorial Board v2.1 is a manuscript-review system with
 specialized reviewer roles orchestrated by an Editor-in-Chief. It advises;
 Pegah decides. Board output enters the Studio through the private watched inbox
 folder (`~/.studio-inbox/`), not through direct API calls that would distribute
-the sync secret to general-purpose Claude sessions.
+the sync secret to general-purpose Claude sessions. There is no direct-POST
+fallback: if the companion is offline, artifacts wait in the inbox and are
+drained when it restarts.
+
+**Authority rule (v1):** the Editorial Board ingestion endpoint rejects every
+payload with a non-empty `rulings` array, regardless of `updatedBy`.
+`updatedBy` is provenance metadata, never authorization — human authorship is
+established by the write path, not asserted by payload content. Automated board
+output always carries `rulings: []`; reviewer recommendations remain advice;
+the UI never presents automated content as a human decision. Live human rulings
+await a genuinely human-authorized write path (a future, versioned contract
+change).
 
 ---
 
@@ -188,4 +228,10 @@ Redis key ownership: see `docs/INGESTION_CONTRACT.md`.
 
 ## Last updated
 
-2026-07-11 · updatedBy: human
+2026-07-12 · updatedBy: claude (coordinator amendments after independent audit)
+reviewedBy: human · 2026-07-12
+
+(Provenance is honest by the project's own rule: these amendments were authored
+by Claude at Pegah's direction. `updatedBy` never converts automated authorship
+into human authorship; `reviewedBy` becomes `human · <date>` only after Pegah
+explicitly approves the amendment diff.)

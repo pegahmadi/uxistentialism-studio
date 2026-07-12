@@ -1,8 +1,16 @@
 /*
- * Shared read-only layer for the vault audit tools.
+ * Shared read-only layer for the vault audit tools AND the reusable projector.
  *
  * Read-only by construction: opens vault files for reading only; the only writes
  * (done by callers) go to the repo's gitignored .vault-audit/ output dir.
+ *
+ * Two calling conventions:
+ *   - Library (daemon-safe): resolveVaultPath() / loadNotesFrom() take explicit
+ *     arguments and THROW VaultError on failure. They never call process.exit(),
+ *     so a long-running companion can catch errors and update its status normally.
+ *   - CLI (audit tools): loadConfig() / assertReadableVault() / loadNotes() keep
+ *     the original behavior — config-file discovery and fail() (process.exit) on
+ *     unrecoverable errors.
  */
 
 import { readFile, readdir, stat } from "node:fs/promises";
@@ -21,6 +29,15 @@ export function fail(msg) {
   process.exit(1);
 }
 
+/** Library error type — thrown, never exits the process. */
+export class VaultError extends Error {
+  constructor(message, code = "VAULT_ERROR") {
+    super(message);
+    this.name = "VaultError";
+    this.code = code;
+  }
+}
+
 export async function loadConfig() {
   let vaultPath = process.env.VAULT_PATH || null;
   let skipFolders = [...DEFAULT_SKIP];
@@ -37,18 +54,37 @@ export async function loadConfig() {
   return { vaultPath, skipFolders };
 }
 
-export function assertReadableVault(vaultPath) {
+/**
+ * Library variant: validate and resolve an explicit vault path. Throws VaultError
+ * (never exits). Refuses paths inside this repo.
+ */
+export function resolveVaultPath(vaultPath) {
   if (!vaultPath) {
-    fail(
-      "No vault path. Set VAULT_PATH or vaultPath in tools/vault-audit/audit.config.json",
+    throw new VaultError(
+      "No vault path provided. Pass an explicit vaultPath (the library does not read audit.config.json).",
+      "NO_VAULT_PATH",
     );
   }
   const resolved = path.resolve(vaultPath);
-  if (!existsSync(resolved)) fail(`Vault path does not exist: ${resolved}`);
+  if (!existsSync(resolved)) throw new VaultError(`Vault path does not exist: ${resolved}`, "VAULT_NOT_FOUND");
   const rel = path.relative(REPO_ROOT, resolved);
   const insideRepo = rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
-  if (insideRepo) fail(`Refusing to scan: vault path is inside this repo (${resolved}).`);
+  if (insideRepo) {
+    throw new VaultError(`Refusing to scan: vault path is inside this repo (${resolved}).`, "VAULT_INSIDE_REPO");
+  }
   return resolved;
+}
+
+/** CLI wrapper: same validation, but exits via fail() for audit-tool ergonomics. */
+export function assertReadableVault(vaultPath) {
+  try {
+    return resolveVaultPath(vaultPath);
+  } catch (e) {
+    if (e instanceof VaultError && e.code === "NO_VAULT_PATH") {
+      fail("No vault path. Set VAULT_PATH or vaultPath in tools/vault-audit/audit.config.json");
+    }
+    fail(e.message);
+  }
 }
 
 export async function walk(dir, skip, out = []) {
@@ -176,10 +212,21 @@ export function analyze(content) {
   };
 }
 
-export async function loadNotes() {
-  const { vaultPath, skipFolders } = await loadConfig();
-  const root = assertReadableVault(vaultPath);
-  const files = await walk(root, skipFolders);
+/**
+ * Library variant: load all vault notes from an explicit vaultPath. Read-only.
+ * Throws VaultError on an unusable vault; never exits the process.
+ *
+ * `skipFolders` is ADDITIVE: caller-provided exclusions are merged with the
+ * safety defaults (DEFAULT_SKIP) and deduplicated — supplying custom exclusions
+ * never removes defaults like Templates or node_modules.
+ *
+ * Note objects contain paths, bodies, and mtimes for INTERNAL use only — callers
+ * must never expose them in any public projection, payload, or log.
+ */
+export async function loadNotesFrom({ vaultPath, skipFolders } = {}) {
+  const root = resolveVaultPath(vaultPath);
+  const skip = Array.from(new Set([...DEFAULT_SKIP, ...(skipFolders ?? [])]));
+  const files = await walk(root, skip);
   const notes = [];
   for (const file of files) {
     let content = "";
@@ -224,6 +271,13 @@ export async function loadNotes() {
     });
   }
   return { root, notes };
+}
+
+/** CLI wrapper: config-file discovery + fail() on error (original behavior). */
+export async function loadNotes() {
+  const { vaultPath, skipFolders } = await loadConfig();
+  const root = assertReadableVault(vaultPath);
+  return loadNotesFrom({ vaultPath: root, skipFolders });
 }
 
 // Resolve wikilinks → inbound counts, referencing notes, unresolved targets,

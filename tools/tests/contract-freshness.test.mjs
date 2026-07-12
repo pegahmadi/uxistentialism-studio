@@ -52,9 +52,10 @@ function applyIngest(state, incoming, serverNowMs) {
       };
     }
     if (incoming.projectedAtMs < meta.projectedAtMs) return { status: "stale_payload", state };
-    if (incoming.revision <= meta.revision && incoming.projectedAtMs !== meta.projectedAtMs) {
-      return { status: "duplicate", state };
-    }
+    // v1.1.2: any reused revision with a different substantive hash is a
+    // duplicate — regardless of projectedAt equality. (Same-hash retries never
+    // reach here; they returned idempotent above.)
+    if (incoming.revision <= meta.revision) return { status: "duplicate", state };
   }
   // Accepted: backup + write data and meta together.
   return {
@@ -138,6 +139,12 @@ check("changed substance with re-used revision → duplicate, no mutation", r.st
 
 r = applyIngest(state, { data: { generatedAt: iso(T0 - HOUR), ...SUBSTANCE_V2 }, revision: 2, projectedAtMs: T0 - HOUR }, T49);
 check("older projectedAt → stale_payload, no mutation", r.status === "stale_payload" && r.state === state);
+
+// v1.1.2 hole-closing case: same revision AND same projectedAt as stored, but
+// a DIFFERENT substantive hash — must be duplicate, never a silent overwrite.
+r = applyIngest(state, { data: { generatedAt: iso(T0), ...SUBSTANCE_V2 }, revision: 1, projectedAtMs: T0 }, T49);
+check("equal revision + equal projectedAt + different hash → duplicate, no overwrite",
+  r.status === "duplicate" && r.state === state);
 
 r = applyIngest(state, { data: { generatedAt: iso(T49), ...SUBSTANCE_V2 }, revision: 2, projectedAtMs: T49 }, T49);
 check("changed substance with next revision → accepted; prev backed up",

@@ -74,6 +74,32 @@ test("timestamps must be EXACT Date.toISOString() format (§1)", async () => {
   await expect400(envelope(obsidianData(), { projectedAt: "2026-99-99T99:99:99.999Z" }), "impossible date");
 });
 
+// v1.1.2 round-trip rule: regex + Date.parse alone would ACCEPT these — V8
+// rolls impossible calendar dates over (2026-02-31 parses as March 3). The
+// server must also require new Date(Date.parse(t)).toISOString() === t.
+const IMPOSSIBLE_DATES = [
+  "2026-02-31T10:00:00.000Z", // February 31st
+  "2025-02-29T00:00:00.000Z", // Feb 29 in a non-leap year
+  "2026-04-31T10:00:00.000Z", // April 31st
+];
+
+test("impossible calendar dates in ENVELOPE timestamps → 400 on both endpoints (v1.1.2 round-trip)", async () => {
+  for (const ts of IMPOSSIBLE_DATES) {
+    await expect400(envelope(obsidianData(), { projectedAt: ts }), `obsidian projectedAt ${ts}`);
+    await expect400(envelope(obsidianData(), { sourceUpdatedAt: ts }), `obsidian sourceUpdatedAt ${ts}`);
+    await expect400(boardEnv(boardData(), { projectedAt: ts }), `board projectedAt ${ts}`, "editorial-board");
+    await expect400(boardEnv(boardData(), { sourceUpdatedAt: ts }), `board sourceUpdatedAt ${ts}`, "editorial-board");
+  }
+});
+
+test("impossible calendar dates in DATA timestamps → 400 on both endpoints (v1.1.2 round-trip)", async () => {
+  for (const ts of IMPOSSIBLE_DATES) {
+    await expect400(withData(obsidianData({ generatedAt: ts })), `generatedAt ${ts}`);
+    await expect400(boardEnv(boardData({ reviewedAt: ts })), `reviewedAt ${ts}`, "editorial-board");
+    await expect400(boardEnv(boardData({ updatedAt: ts })), `updatedAt ${ts}`, "editorial-board");
+  }
+});
+
 test("revision must be an integer ≥ 1", async () => {
   for (const v of [0, -1, 1.5, "1", null]) {
     await expect400(envelope(obsidianData(), { revision: v }), `revision ${JSON.stringify(v)}`);

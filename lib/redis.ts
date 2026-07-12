@@ -122,6 +122,26 @@ export async function evalIngest(
   return parsed as IngestEvalResult;
 }
 
+/** Minimal client surface readSnapshot needs (real Redis or a test fake). */
+export interface MgetCapable {
+  mget(...keys: string[]): Promise<unknown[]>;
+}
+
+/**
+ * Single-snapshot read (v1.1.2 §8): fetch `{key}` and `{key}-meta` in ONE
+ * atomic MGET so an ingestion landing mid-read can never produce a mixed
+ * data/meta pair. lib readers must use this — never two independent GETs.
+ * Throws on transport failure (callers map that to their fallback path).
+ */
+export async function readSnapshot(
+  redis: MgetCapable,
+  baseKey: string,
+): Promise<{ rawData: unknown; rawMeta: unknown }> {
+  const row = await redis.mget(baseKey, `${baseKey}-meta`);
+  if (!Array.isArray(row) || row.length !== 2) throw new Error("unexpected mget result shape");
+  return { rawData: row[0], rawMeta: row[1] };
+}
+
 /**
  * Server-built meta record stored at `{key}-meta` and read by /api/sync-status
  * and the lib readers. lastAttempt is intentionally absent — v1 records only

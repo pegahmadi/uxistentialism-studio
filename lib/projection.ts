@@ -10,7 +10,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { getRedis } from "@/lib/redis";
+import { getRedis, readSnapshot } from "@/lib/redis";
 import { isStale, type DataResult } from "@/lib/data-result";
 import {
   IDEAS,
@@ -69,7 +69,8 @@ function fixtureResult(error: string | null): ProjectionResult {
 
 /**
  * The one snapshot per request (§8): Redis primary, fixture fallback, curated
- * default. One data read + one metadata read; never throws.
+ * default. Data + metadata arrive in ONE atomic MGET (v1.1.2) so a concurrent
+ * ingestion can never yield a mixed data/meta pair; never throws.
  */
 export async function getProjection(): Promise<ProjectionResult> {
   const redis = getRedis();
@@ -78,10 +79,7 @@ export async function getProjection(): Promise<ProjectionResult> {
   let rawData: unknown;
   let rawMeta: unknown;
   try {
-    [rawData, rawMeta] = await Promise.all([
-      redis.get("obsidian-projection"),
-      redis.get("obsidian-projection-meta"),
-    ]);
+    ({ rawData, rawMeta } = await readSnapshot(redis, "obsidian-projection"));
   } catch {
     return fixtureResult("redis_unreachable");
   }

@@ -15,7 +15,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { getRedis } from "@/lib/redis";
+import { getRedis, readSnapshot } from "@/lib/redis";
 import { isStale, type DataResult } from "@/lib/data-result";
 
 export const EDITORIAL_BOARD_SCHEMA_VERSION = 1;
@@ -163,8 +163,9 @@ function fixtureResult(error: string | null): EditorialBoardResult {
 }
 
 /**
- * The one snapshot per request (§8): Redis primary, fixture fallback. One data
- * read + one metadata read; never throws.
+ * The one snapshot per request (§8): Redis primary, fixture fallback. Data +
+ * metadata arrive in ONE atomic MGET (v1.1.2) so a concurrent ingestion can
+ * never yield a mixed data/meta pair; never throws.
  */
 export async function getEditorialBoard(): Promise<EditorialBoardResult> {
   const redis = getRedis();
@@ -173,7 +174,7 @@ export async function getEditorialBoard(): Promise<EditorialBoardResult> {
   let rawData: unknown;
   let rawMeta: unknown;
   try {
-    [rawData, rawMeta] = await Promise.all([redis.get("editorial-board"), redis.get("editorial-board-meta")]);
+    ({ rawData, rawMeta } = await readSnapshot(redis, "editorial-board"));
   } catch {
     return fixtureResult("redis_unreachable");
   }

@@ -1,6 +1,6 @@
 # UXistentialism Studio — Ingestion Contract
 
-Version: 1.0.0 · 2026-07-11
+Version: 1.1.0 · 2026-07-12
 
 This document is the authoritative specification for every payload the local
 Studio Sync companion sends to the hosted Studio, and for every payload the
@@ -10,6 +10,14 @@ implement this contract identically.
 Any change to schemas, key names, authentication rules, or versioning policy
 requires a new contract version and coordinated updates to the companion and
 the server before deployment.
+
+**v1.1.0 changes (coordinator ruling after independent audit):** companion-owned
+transport envelope; canonical serialization + server-side hash recomputation
+(§1b); strict timestamp format; Editorial Board `rulings` must be empty on the
+v1 ingestion endpoint (§2b); atomic compare-and-set writes (§6); actual-byte
+size enforcement (§4); length-safe authentication (§3); sync-status degraded
+behavior (§2e); single-snapshot read rule and lazy Redis client (§8);
+`sourceUpdatedAt` semantics (§10); exact-version validation (§12).
 
 ---
 
@@ -29,17 +37,36 @@ Every payload sent to any ingestion endpoint uses this top-level structure.
 }
 ```
 
+### Envelope ownership
+
+**The companion is the sole author of the transport envelope** for every
+submission — vault projections and inbox artifacts alike. Upstream producers
+(e.g. the Editorial Board skill) emit **data only**, plus any source-event
+timestamp the companion needs to derive `sourceUpdatedAt`. The companion
+validates the data, assigns the next per-endpoint `revision` from its persistent
+status file, computes `payloadHash` (§1b), and constructs the envelope. No board
+session or other upstream producer ever chooses a transport revision or hash.
+
 ### Envelope field definitions
 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `schemaVersion` | integer | yes | Contract version. Currently `1`. |
 | `source` | string | yes | Who sent this payload. See allowed values below. |
-| `sourceUpdatedAt` | ISO 8601 UTC | yes | Latest mtime of source files that contributed to this payload. Not when the companion ran. |
+| `sourceUpdatedAt` | ISO 8601 UTC | yes | Newest mtime among source files that can affect this payload (see §10). Not when the companion ran. |
 | `projectedAt` | ISO 8601 UTC | yes | When the companion generated and validated this payload. |
 | `revision` | integer ≥ 1 | yes | Monotonically increasing per endpoint, tracked in companion status file. |
-| `payloadHash` | string | yes | `sha256-` prefix followed by hex SHA-256 of the serialized `data` field only. |
+| `payloadHash` | string | yes | `sha256-` prefix followed by hex SHA-256 of the canonical serialization of `data` (§1b). |
 | `data` | object | yes | Payload body. Schema varies by endpoint. |
+
+### Timestamp format
+
+`sourceUpdatedAt`, `projectedAt`, and every ISO timestamp inside `data` MUST use
+the exact `Date.toISOString()` format — `YYYY-MM-DDTHH:mm:ss.sssZ`, validated by
+`/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/`. Any other ISO 8601 variant is
+rejected with 400 `invalid_schema`. Before any ordering comparison (§6), the
+server converts timestamps to epoch milliseconds and compares numerically —
+never by string comparison.
 
 ### Allowed `source` values
 
@@ -50,6 +77,33 @@ Every payload sent to any ingestion endpoint uses this top-level structure.
 | `"studio-ui"` | Workspace override submitted from within the Studio (WS-4) |
 
 Unknown top-level fields are rejected with 400.
+
+---
+
+## 1b. Canonical serialization and hashing
+
+`payloadHash` is computed over the **canonical serialization** of the `data`
+object:
+
+1. Objects: keys sorted lexicographically by Unicode code point, recursively.
+2. **Arrays retain their order** (order is semantically meaningful).
+3. No insignificant whitespace.
+4. Strings, numbers, booleans, and `null` serialize per `JSON.stringify`
+   semantics (shortest round-trip numbers, standard string escaping).
+5. The canonical string is UTF-8 encoded before hashing.
+6. `payloadHash = "sha256-" + hex(SHA-256(bytes))`.
+
+Values with no JSON representation — `undefined`, `NaN`, `Infinity`,
+`-Infinity`, functions, `BigInt`, circular references — are invalid anywhere in
+the payload and are rejected with 400 `invalid_schema` **before** hashing.
+(Server-side this is guaranteed by parsing the raw JSON body; the companion must
+guarantee it before serializing.)
+
+**The server always recomputes the hash** from the received `data` using this
+canonicalization. A mismatch between the recomputed hash and the envelope's
+`payloadHash` is rejected with 400 `invalid_schema`. The server uses **its own
+recomputed hash** — never the client-asserted value — for idempotency
+comparison (§6) and for storage in `{key}-meta`.
 
 ---
 
@@ -88,6 +142,10 @@ The `data` field must contain exactly:
 - `presentIn` contains Studio environment slugs: `"today"`, `"field"`, `"formation"`,
   `"iteration"`, `"distribution"`, `"memory"`. Unknown slugs are tolerated (ignored).
 - Unknown fields inside `data` or inside any array element are rejected with 400.
+  In particular, a `source` field inside `data` is rejected — source/provenance
+  lives only in the transport envelope. (The committed fallback fixture
+  `data/projections/obsidian.json` may carry a legacy `source` key; readers
+  tolerate unknown fixture fields per §12, but it is never submitted.)
 
 Redis keys written: `obsidian-projection`, `obsidian-projection-meta`, `obsidian-projection-prev`.
 
@@ -128,6 +186,27 @@ The `data` field must contain exactly:
 - No manuscript body text. Diagnosis and recommendation are diagnostic summaries only.
 - No private transcript text.
 - Unknown fields inside `data` are rejected with 400.
+
+**Rulings rule (v1 — authority boundary).** This endpoint rejects **every
+payload whose `rulings` array is non-empty, regardless of `updatedBy`**
+(400 `invalid_schema`). Rationale: `updatedBy` is payload content asserted by
+whatever session produced the artifact — the sync secret authenticates the
+companion, not the human authorship of a field. Human authorship must be
+established by the **write path**, not asserted by payload content.
+
+- `updatedBy` is **provenance metadata only** — never authorization or
+  attestation.
+- Automated Editorial Board output always carries `rulings: []`. Reviewer
+  `recommendation`s remain advice; `nextDecision` may describe what needs the
+  human's judgment, but no field may imply a decision the human did not
+  explicitly make.
+- The `rulings` field remains in the schema for forward compatibility. Live
+  human rulings are out of scope until a genuinely human-authorized write path
+  exists (e.g. an authenticated Studio UI action with explicit confirmation);
+  introducing one is a contract change requiring a version bump.
+- The committed fallback fixture's rulings are human-curated legacy data and
+  may remain; the UI must present live board content as advice and may present
+  rulings as human decisions only from that human-curated source.
 
 Redis keys written: `editorial-board`, `editorial-board-meta`, `editorial-board-prev`.
 
@@ -212,6 +291,25 @@ Returns the current sync status for all tracked keys.
 
 No authentication required. No secrets in response.
 
+Behavior rules:
+
+- `GET` only; other methods return 405. The route is `force-dynamic` and sets
+  `Cache-Control: no-store`.
+- **Redis unavailable:** return 200 with `degraded: true` at the top level and
+  `null` metadata values — never a 5xx, never internal error details.
+- **Never synced** (Redis reachable, key absent) is distinguishable from
+  **status unavailable** (Redis unreachable): the former is `degraded: false`
+  with `null` values for that key; the latter is `degraded: true`.
+- The `error` field per key carries a short category string only — never stack
+  traces, connection strings, paths, or credentials.
+
+```typescript
+{
+  degraded: boolean;   // true when Redis itself could not be reached
+  keys: { ... };       // as above; per-key values null when unknown
+}
+```
+
 ---
 
 ## 3. Authentication contract
@@ -227,7 +325,12 @@ Rules:
   endpoints return 500 and log an internal error. They do not fall back to
   unauthenticated access.
 - Secret comparison uses constant-time byte comparison (`crypto.timingSafeEqual`)
-  to prevent timing attacks.
+  to prevent timing attacks, with **length-safe handling**: first validate the
+  header shape (`Authorization: Bearer <token>`, missing/malformed → 401);
+  convert token and secret to buffers; if the byte lengths differ, return 401
+  without calling `timingSafeEqual` (it throws on unequal lengths) — e.g. by
+  comparing the token against an equal-length dummy or checking lengths first.
+  Every credential failure returns the identical 401 `auth_failed` response.
 - The secret value must not appear in any log line, error response, or HTTP header
   beyond the one Authorization header the companion sends.
 - Rotating the secret: update `STUDIO_SYNC_SECRET` in Vercel environment variables
@@ -240,9 +343,14 @@ Rules:
 
 - `Content-Type: application/json` is required. Requests with any other
   content type are rejected with 415 before reading the body.
-- `Content-Length` must be present and must not exceed 512KB. Requests
-  without a Content-Length header, or with Content-Length > 512KB, are
-  rejected with 413 before reading the body.
+- `Content-Length` must be present, well-formed, and non-negative. A missing,
+  malformed, or negative header, or a declared size over 512KB, is rejected
+  with 413 before reading the body.
+- **Actual bytes are enforced, not just the header.** The body is read as a
+  bounded stream (or bounded text read); if the actual received bytes exceed
+  512KB — regardless of the declared `Content-Length` — the request is
+  rejected with 413. The server must never call `request.json()` on an
+  unbounded body after checking only the header.
 - Only `POST` is accepted at ingestion endpoints. Other methods return 405.
 
 ---
@@ -261,17 +369,44 @@ and must be surfaced as an error, not silently retried.
 
 ---
 
-## 6. Stale-write and duplicate-write policy
+## 6. Stale-write and duplicate-write policy (atomic)
 
-Before writing to Redis, the server reads `{key}-meta` for the stored
-`projectedAt`, `revision`, and `payloadHash`.
+The stale/duplicate comparison and the Redis mutation are **one atomic
+operation**. The server must not use a read-then-write sequence: concurrent
+requests could both pass validation and overwrite one another, and data, meta,
+and the `-prev` backup could diverge after a partial failure.
 
-| Condition | Server action | HTTP response |
+**Required implementation:** a single Redis `EVAL` (Lua) script — supported by
+Upstash REST and exposed as `.eval()` in `@upstash/redis` — invoked with keys
+`{key}`, `{key}-meta`, `{key}-prev`. Inside one atomic execution the script:
+
+1. reads the stored `revision`, `projectedAt` (epoch ms), and `payloadHash`
+   from `{key}-meta`;
+2. returns `idempotent`, `stale`, or `duplicate` when the corresponding
+   condition below holds (no mutation);
+3. otherwise copies the current `{key}` value to `{key}-prev` and writes the
+   new data and meta **together**, then returns `accepted`.
+
+Timestamps are validated against the exact format in §1 and converted to
+**epoch milliseconds** before being passed into the script; all ordering
+comparisons are numeric. The hash used is the server's recomputed hash (§1b).
+
+| Condition (evaluated atomically) | Result | HTTP response |
 |---|---|---|
-| `payloadHash` matches stored hash | No write. Idempotent accept. | 200 `{ ok: true, status: "idempotent" }` |
+| Recomputed hash matches stored hash | No write. Idempotent accept. | 200 `{ ok: true, status: "idempotent" }` |
 | Incoming `projectedAt` < stored `projectedAt` | No write. | 409 `{ error: "stale_payload", ... }` |
 | Incoming `revision` ≤ stored `revision` AND `projectedAt` ≠ stored | No write. | 409 `{ error: "duplicate", ... }` |
-| All checks pass | Backup current data to `{key}-prev`. Write new data and meta. | 200 `{ ok: true, status: "accepted" }` |
+| All checks pass | Backup + write data and meta together. | 200 `{ ok: true, status: "accepted" }` |
+
+**Client semantics (companion):**
+
+- 200 `idempotent` is a **success**: the server already holds this exact
+  payload. Update `lastSuccess` normally.
+- 409 `stale_payload` and 409 `duplicate` are **non-retryable conflicts**: do
+  not retry the same payload, do not record `lastSuccess`, and surface the
+  conflict in visible status. Recover the revision sequence from the
+  `storedRevision` in the error response (next submission uses
+  `storedRevision + 1` with a fresh projection).
 
 The server does not call `revalidatePath`. Pages use `export const dynamic =
 "force-dynamic"` and read from Redis on every request. There is no route cache
@@ -286,9 +421,9 @@ to invalidate.
 | `obsidian-projection` | WS-1 companion pipeline | `obsidian-projection-prev` | Sanitized concept graph from vault |
 | `obsidian-projection-meta` | WS-1 | — | Envelope metadata for the above |
 | `obsidian-projection-prev` | WS-1 | — | Previous value (one-level rollback) |
-| `editorial-board` | WS-1/WS-3 inbox pipeline | `editorial-board-prev` | Board snapshot |
-| `editorial-board-meta` | WS-1/WS-3 | — | Envelope metadata for the above |
-| `editorial-board-prev` | WS-1/WS-3 | — | Previous value (one-level rollback) |
+| `editorial-board` | WS-1 endpoint writes · WS-2 companion submits · WS-3 board skill supplies data | `editorial-board-prev` | Board snapshot |
+| `editorial-board-meta` | WS-1 endpoint | — | Envelope metadata for the above |
+| `editorial-board-prev` | WS-1 endpoint | — | Previous value (one-level rollback) |
 | `workspace-inferred` | WS-4 companion pipeline | — | Vault-derived workspace signals |
 | `workspace-inferred-meta` | WS-4 | — | Envelope metadata for the above |
 | `workspace-override` | WS-4 Studio UI | — | Explicit human overrides |
@@ -327,6 +462,24 @@ distinguishable from live data. Silent degradation is not permitted.
 interval (default 6 hours) ensures the threshold is not reached under normal
 operation.
 
+**Client construction rule.** The Redis client must be a lazy, guarded,
+server-only accessor. Missing or malformed Redis configuration is an explicit
+fallback condition (`source: "fallback"`), never a module-initialization crash:
+pages must remain renderable from fixtures with no Redis env vars present.
+
+**Snapshot rule.** Each page request loads **one** `DataResult<T>` snapshot per
+data source and derives every view (concepts, graph, graph details, emerging,
+etc.) from that single snapshot, with one metadata read. Derived views must not
+independently re-fetch, or one response could mix different snapshots and
+report inconsistent provenance. No module-scope data reads: all reads happen
+inside request-time functions.
+
+**Workspace boundary (WS-1/WS-4).** During WS-1, Workspace does not read from
+Redis: `lib/workspace.ts` keeps its fixture/default read path, wrapped in
+`DataResult` with honest `source: "fallback" | "default"`. The
+`workspace-inferred` / `workspace-override` merge (human overrides authoritative
+per field) is WS-4 scope. No other workspace Redis key may be introduced.
+
 ---
 
 ## 9. Error response format
@@ -363,7 +516,7 @@ HTTP status codes:
 
 | Timestamp | Meaning | Set by |
 |---|---|---|
-| `sourceUpdatedAt` | Latest mtime of vault source files contributing to this payload | Companion |
+| `sourceUpdatedAt` | Newest mtime among **every scanned (non-skipped) vault note** — not only allowlisted notes, because non-allowlisted notes contribute to backlink and emerging reference counts. A single timestamp; no note identities, paths, or per-note mtimes are exposed. If zero notes are scanned, the projector errors and nothing is submitted. For inbox artifacts, the source-event timestamp supplied with the data. | Companion (via the projector library) |
 | `projectedAt` | When the companion ran the projection and generated this payload | Companion |
 | `lastSuccessfulSync` | When the server last accepted and stored a payload | Server (in `{key}-meta`) |
 | `stale` | Whether `lastSuccessfulSync` is more than 24h ago | `lib/*.ts` at read time |
@@ -400,8 +553,12 @@ the companion generated and fix the root cause before re-enabling sync.
 ## 12. Compatibility and schema-versioning rules
 
 - `schemaVersion: 1` is the current version.
-- The server accepts any `schemaVersion` ≤ its supported maximum.
-- The server rejects `schemaVersion` greater than its supported maximum with 400.
+- **Operative rule:** the server accepts only `schemaVersion` values for which
+  it has a registered validator — today, **exactly `1`**. Every other value
+  (higher, lower, non-integer) is rejected with 400. Version-specific
+  validators are added only when a second version actually exists; "accepts ≤
+  maximum" describes the forward-compatibility *intent*, not a license to pass
+  old versions through the latest validator.
 - A breaking change (removed required field, type change, key rename) requires
   incrementing `schemaVersion`. Both the companion and the server must be updated
   and deployed in coordination before the new version is used in production.
@@ -410,7 +567,9 @@ the companion generated and fix the root cause before re-enabling sync.
 - The companion always sends the highest `schemaVersion` it supports.
 - The committed fallback fixtures (`data/projections/*.json`) do not carry
   `schemaVersion` in their current form and are exempt from this policy.
-  They are treated as unversioned fallback data.
+  They are treated as unversioned fallback data: readers select the fields they
+  know and tolerate unknown fixture fields (e.g. a legacy `source` key).
+  Strict unknown-field rejection applies to **submitted payloads only**.
 
 ---
 

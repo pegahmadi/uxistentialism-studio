@@ -94,6 +94,23 @@ test("re-used revision with different projectedAt and changed substance → 409 
   assert.deepEqual(new Map(redis.store), snapshot);
 });
 
+test("equal revision + equal projectedAt + DIFFERENT hash → 409 duplicate, no mutation (v1.1.2 hole close)", async () => {
+  // Under the pre-v1.1.2 rule (duplicate only when projectedAt ≠ stored) this
+  // exact case fell through to ACCEPTED — a changed payload silently consumed
+  // an already-used revision. v1.1.2 drops the qualifier: it must be duplicate.
+  const redis = new FakeRedis();
+  await submitAt(redis, projectUnchanged(T0), 1, T0);
+  const snapshot = new Map(redis.store);
+
+  const changed = { generatedAt: iso(T0), ...substance, emerging: [{ term: "gamma missing", references: 99 }] };
+  const r = await submitAt(redis, changed, 1, T0, T0 + HOUR); // same revision, same projectedAt, new substance
+  assert.equal(r.status, 409);
+  assert.equal(r.body.error, "duplicate");
+  assert.equal(r.body.storedRevision, 1);
+  assert.equal(r.body.storedProjectedAt, iso(T0));
+  assert.deepEqual(new Map(redis.store), snapshot, "duplicate must not mutate anything (not even the heartbeat)");
+});
+
 test("changed substance with next revision → accepted; prev backed up; meta updated together", async () => {
   const redis = new FakeRedis();
   await submitAt(redis, projectUnchanged(T0), 1, T0);

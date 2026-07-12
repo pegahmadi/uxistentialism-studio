@@ -11,12 +11,12 @@ export const SECRET = "test-secret-0123456789abcdef";
 
 /**
  * In-memory fake Redis. `eval` is a JS twin of INGEST_LUA — synchronous inside
- * (atomic, like Lua) and behaviorally identical to the state machine locked by
- * tools/tests/contract-freshness.test.mjs:
- *   hash match → idempotent (heartbeat refresh ONLY)
- *   projectedAt < stored → stale_payload (no mutation)
- *   revision ≤ stored AND projectedAt ≠ stored → duplicate (no mutation)
- *   otherwise → accepted (backup prev + write data and meta together)
+ * (atomic, like Lua) and behaviorally identical to the v1.1.2 state machine
+ * (the shared contract-freshness test is updated to this rule at merge time):
+ *   1. hash match → idempotent (heartbeat refresh ONLY)
+ *   2. projectedAt < stored → stale_payload (no mutation)
+ *   3. revision ≤ stored → duplicate (no mutation; NO projectedAt qualifier)
+ *   4. otherwise → accepted (backup prev + write data and meta together)
  */
 export class FakeRedis {
   constructor() {
@@ -27,6 +27,10 @@ export class FakeRedis {
 
   async get(key) {
     return this.store.has(key) ? this.store.get(key) : null;
+  }
+
+  async mget(...keys) {
+    return keys.map((k) => (this.store.has(k) ? this.store.get(k) : null));
   }
 
   async set(key, value) {
@@ -55,7 +59,7 @@ export class FakeRedis {
         if (incomingMs < Number(m.projectedAtMs)) {
           result = { status: "stale_payload", storedRevision: m.revision, storedProjectedAt: m.projectedAt };
           handled = true;
-        } else if (incomingRev <= Number(m.revision) && incomingMs !== Number(m.projectedAtMs)) {
+        } else if (incomingRev <= Number(m.revision)) {
           result = { status: "duplicate", storedRevision: m.revision, storedProjectedAt: m.projectedAt };
           handled = true;
         }

@@ -50,11 +50,14 @@ export function _resetRedisForTests(): void {
  * ARGV[5] = incoming projectedAt epoch ms (decimal string)
  * ARGV[6] = server now, ISO 8601 (heartbeat value)
  *
- * State machine (must match tools/tests/contract-freshness.test.mjs):
- *   hash match            → idempotent: refresh ONLY lastSuccessfulSync
- *   projectedAt < stored  → stale_payload: no mutation
- *   revision ≤ stored AND projectedAt ≠ stored → duplicate: no mutation
- *   otherwise             → accepted: backup prev + write data & meta together
+ * State machine (contract v1.1.2 — the shared contract-freshness test is
+ * updated to this same rule at merge time):
+ *   1. hash match            → idempotent: refresh ONLY lastSuccessfulSync
+ *   2. projectedAt < stored  → stale_payload: no mutation
+ *   3. revision ≤ stored     → duplicate: no mutation (NO projectedAt
+ *      inequality qualifier — a changed payload re-using a consumed revision
+ *      is duplicate even when its projectedAt equals the stored one)
+ *   4. otherwise             → accepted: backup prev + write data & meta together
  */
 export const INGEST_LUA = `
 local rawMeta = redis.call('GET', KEYS[2])
@@ -70,7 +73,7 @@ if rawMeta then
   if incomingMs < tonumber(m.projectedAtMs) then
     return cjson.encode({ status = 'stale_payload', storedRevision = m.revision, storedProjectedAt = m.projectedAt })
   end
-  if incomingRev <= tonumber(m.revision) and incomingMs ~= tonumber(m.projectedAtMs) then
+  if incomingRev <= tonumber(m.revision) then
     return cjson.encode({ status = 'duplicate', storedRevision = m.revision, storedProjectedAt = m.projectedAt })
   end
 end

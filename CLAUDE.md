@@ -104,8 +104,8 @@ verify the deployed commit is the intended WS-1 merge.
 | Workstream | Branch | May modify or create |
 |---|---|---|
 | WS-0 | `ws/claude-md` (merged) | `CLAUDE.md`, `docs/INGESTION_CONTRACT.md` |
-| Coordinator | `ws/contract-amendments` | `CLAUDE.md`, `docs/INGESTION_CONTRACT.md`, shared infrastructure (`integrations/`, `tools/`), and — as a documented exception — `WORKSTREAM.md` briefs on the WS branches |
-| WS-1 | `ws/live-data` | `lib/`, `app/`, `package.json`, `next.config.ts` |
+| Coordinator | `ws/contract-amendments` | `CLAUDE.md`, `docs/INGESTION_CONTRACT.md`, shared infrastructure (`integrations/`, `tools/`), and — as a documented exception — `WORKSTREAM.md` and `PLAN.md` briefs on the WS branches |
+| WS-1 | `ws/live-data` | `lib/`, `app/`, `tests/ws1/`, `package.json`, `next.config.ts` |
 | WS-2 | `ws/companion` | `companion/` |
 | WS-3 | `ws/editorial-board-output` | Editorial Board skill (external), `docs/EDITORIAL_BOARD_OUTPUT.md` |
 | WS-4 | `ws/workspace-inference` | `companion/workspace-signals.mjs`, `app/api/ingest/workspace-signals/`, `lib/workspace.ts` (extension only) |
@@ -213,9 +213,13 @@ payload with a non-empty `rulings` array, regardless of `updatedBy`.
 `updatedBy` is provenance metadata, never authorization — human authorship is
 established by the write path, not asserted by payload content. Automated board
 output always carries `rulings: []`; reviewer recommendations remain advice;
-the UI never presents automated content as a human decision. Live human rulings
-await a genuinely human-authorized write path (a future, versioned contract
-change).
+the UI never presents automated content as a human decision. For the same
+reason the endpoint also rejects `manuscript.status: "complete"` on every live
+submission — completion is human-attested state, and the server independently
+enforces this rather than trusting upstream layers ("awaiting ruling" is
+acceptable: it names unresolved judgment, claiming no decision). Live human
+rulings and live "complete" state await a genuinely human-authorized write path
+(a future, versioned contract change).
 
 ---
 
@@ -229,7 +233,8 @@ Redis key ownership: see `docs/INGESTION_CONTRACT.md`.
 ## Last updated
 
 2026-07-12 · updatedBy: claude (coordinator amendments after independent audit)
-reviewedBy: human · 2026-07-12
+reviewedBy: human — pending review (addendum v1.1.1 under review; prior
+amendments through 00e9fe3 were approved 2026-07-12)
 
 (Provenance is honest by the project's own rule: these amendments were authored
 by Claude at Pegah's direction. `updatedBy` never converts automated authorship

@@ -9,12 +9,19 @@
  * Reusable as a library (`validateProjection(...)`) and runnable standalone:
  *   node tools/validate-projection.mjs
  * Exits non-zero on any violation.
+ *
+ * Callers may validate an in-memory object instead of a file by passing
+ * `projection` (contract v1.1.1 — lets the companion validate without writing
+ * any projection file). The content scan uses the shared public-safety
+ * primitive (tools/public-safety.mjs) so this validator, the companion, and
+ * the ingestion endpoints cannot drift.
  */
 
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { scanPublicSafety } from "./public-safety.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..");
@@ -24,78 +31,46 @@ const CONCEPT_FIELDS = new Set(["id", "title", "kind", "category", "summary", "p
 const CONNECTION_FIELDS = new Set(["from", "to"]);
 const EMERGING_FIELDS = new Set(["term", "references"]);
 
-// Keys that would signal vault-internal data leaking into the projection.
-const FORBIDDEN_KEYS = new Set([
-  "body",
-  "vaultKey",
-  "path",
-  "relPath",
-  "folder",
-  "fileName",
-  "fileBase",
-  "mtime",
-  "mtimeMs",
-  "birthtime",
-]);
-
-// Any string value that looks like a filesystem path or a note file is a leak.
-function leaksPath(str, vaultPath) {
-  if (typeof str !== "string") return false;
-  if (/\/Users\//.test(str)) return true; // absolute home path
-  if (/[A-Za-z]:\\/.test(str)) return true; // windows path
-  if (/\.md(?:["'`\s]|$)/i.test(str)) return true; // a note filename
-  if (vaultPath && str.includes(vaultPath)) return true;
-  return false;
-}
-
-// Walk every value; collect forbidden keys and path-leaking strings anywhere.
-function deepScan(node, add, vaultPath, trail = "$") {
-  if (Array.isArray(node)) {
-    node.forEach((v, i) => deepScan(v, add, vaultPath, `${trail}[${i}]`));
-    return;
-  }
-  if (node && typeof node === "object") {
-    for (const [k, v] of Object.entries(node)) {
-      if (FORBIDDEN_KEYS.has(k)) add(`forbidden key "${k}" present at ${trail}`);
-      deepScan(v, add, vaultPath, `${trail}.${k}`);
-    }
-    return;
-  }
-  if (typeof node === "string" && leaksPath(node, vaultPath)) {
-    add(`path-like string leaked at ${trail}: ${JSON.stringify(node.slice(0, 80))}`);
-  }
-}
-
 function extraKeys(obj, allowed) {
   return Object.keys(obj).filter((k) => !allowed.has(k));
 }
 
 /**
  * Validate a projection against its allowlist.
+ * @param {object} [opts]
+ * @param {object} [opts.projection]     in-memory projection object; when present, no file is read
+ * @param {string} [opts.projectionPath] path to a projection JSON file (default: committed fixture)
+ * @param {string} [opts.allowlistPath]  path to the allowlist (default: integrations/obsidian/allowlist.json)
+ * @param {string} [opts.vaultPath]      local vault path; treated as a forbidden substring
  * @returns {{ ok: boolean, violations: string[], stats: object }}
  */
-export async function validateProjection({ projectionPath, allowlistPath, vaultPath } = {}) {
-  const projPath = projectionPath || path.join(REPO_ROOT, "data", "projections", "obsidian.json");
+export async function validateProjection({ projection, projectionPath, allowlistPath, vaultPath } = {}) {
   const allowPath =
     allowlistPath || path.join(REPO_ROOT, "integrations", "obsidian", "allowlist.json");
 
   const violations = [];
   const add = (m) => violations.push(m);
 
-  if (!existsSync(projPath)) {
-    return { ok: false, violations: [`projection not found: ${projPath}`], stats: {} };
+  let proj = projection;
+  if (proj === undefined) {
+    const projPath = projectionPath || path.join(REPO_ROOT, "data", "projections", "obsidian.json");
+    if (!existsSync(projPath)) {
+      return { ok: false, violations: [`projection not found: ${projPath}`], stats: {} };
+    }
+    try {
+      proj = JSON.parse(await readFile(projPath, "utf8"));
+    } catch (e) {
+      return { ok: false, violations: [`projection is not valid JSON: ${e.message}`], stats: {} };
+    }
   }
+  if (!proj || typeof proj !== "object") {
+    return { ok: false, violations: ["projection is not an object"], stats: {} };
+  }
+
   if (!existsSync(allowPath)) {
     return { ok: false, violations: [`allowlist not found: ${allowPath}`], stats: {} };
   }
-
-  let proj;
   let allow;
-  try {
-    proj = JSON.parse(await readFile(projPath, "utf8"));
-  } catch (e) {
-    return { ok: false, violations: [`projection is not valid JSON: ${e.message}`], stats: {} };
-  }
   try {
     allow = JSON.parse(await readFile(allowPath, "utf8"));
   } catch (e) {
@@ -144,8 +119,8 @@ export async function validateProjection({ projectionPath, allowlistPath, vaultP
     if (typeof em.references !== "number") add(`${where}: references must be a number`);
   }
 
-  // Deep scan for leaked keys / paths anywhere in the structure.
-  deepScan(proj, add, vaultPath);
+  // Deep scan for leaked keys / paths anywhere — shared §5 primitive.
+  violations.push(...scanPublicSafety(proj, { extraNeedles: vaultPath ? [vaultPath] : [] }));
 
   return {
     ok: violations.length === 0,

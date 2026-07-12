@@ -1,6 +1,12 @@
 # UXistentialism Studio — Ingestion Contract
 
-Version: 1.1.0 · 2026-07-12
+Version: 1.1.1 · 2026-07-12
+
+**v1.1.1 addendum (coordinator rulings on worker replanning questions):** live
+Editorial Board submissions must not claim `manuscript.status: "complete"`
+(§2b); inbox artifact wire format and collision-resistant filename convention
+(§2b); `lastAttempt` is null in v1 (§2e); reusable public-safety content-scan
+primitive (§5); in-memory `validateProjection` bridge; WS-1 test path.
 
 This document is the authoritative specification for every payload the local
 Studio Sync companion sends to the hosted Studio, and for every payload the
@@ -225,6 +231,47 @@ established by the **write path**, not asserted by payload content.
   may remain; the UI must present live board content as advice and may present
   rulings as human decisions only from that human-curated source.
 
+**Status rule (v1).** For the same reason, every live submission with
+`manuscript.status: "complete"` is rejected with 400 `invalid_schema`,
+regardless of `updatedBy` — completion is human-attested state, and the server
+enforces this independently rather than trusting upstream validation. Automated
+artifacts use `"in review"` or `"awaiting ruling"` (`"awaiting ruling"` names
+unresolved judgment; it claims no decision). The committed fallback fixture may
+retain any status under §12 fixture-tolerance. A future human-authorized write
+path may introduce live `"complete"` via a versioned contract change. This rule
+is enforced at all three layers — WS-3 never emits `"complete"`, the WS-2
+companion validator rejects it, and the WS-1 endpoint rejects it server-side.
+
+**Inbox artifact format (board skill → companion).** The Editorial Board skill
+writes a **data-only** artifact into `~/.studio-inbox/`:
+
+```json
+{
+  "sourceUpdatedAt": "2026-07-12T18:04:07.123Z",
+  "data": { }
+}
+```
+
+- Exactly these two top-level keys — `sourceUpdatedAt` (exact
+  `Date.toISOString()` format) and `data` (this section's schema). Any other
+  top-level key → the companion moves the file to `rejected/`.
+- A missing or malformed `sourceUpdatedAt` → `rejected/`. The companion never
+  substitutes the file's mtime (it would misreport source-state age).
+- **Filename:** `editorial-board-<timestamp>-<unique-suffix>.json`, where
+  `<timestamp>` is `Date.toISOString()` with `:` and `.` replaced by `-`
+  (e.g. `2026-07-12T18-04-07-123Z`) and `<unique-suffix>` is a UUID or
+  equivalently unique identifier (millisecond timestamps alone can collide).
+  The producer creates the file exclusively/atomically and never overwrites an
+  existing path.
+- **Companion processing order:** ascending by the parsed timestamp prefix,
+  with the unique suffix as a deterministic tie-breaker; file mtime is the
+  fallback ordering for legacy/nonconforming names.
+- The companion validates `data` against this section (including the rulings
+  and status rules), then constructs the entire envelope (§1): assigns
+  `revision` from its persistent `editorial-board` sequence, computes
+  `payloadHash` (§1b), and sets `source: "editorial-board-inbox"` and
+  `sourceUpdatedAt` from the artifact.
+
 Redis keys written: `editorial-board`, `editorial-board-meta`, `editorial-board-prev`.
 
 ---
@@ -319,6 +366,14 @@ Behavior rules:
   with `null` values for that key; the latter is `degraded: true`.
 - The `error` field per key carries a short category string only — never stack
   traces, connection strings, paths, or credentials.
+- **`lastAttempt` is always `null` in v1.** The server records only successful
+  verifications (§6 forbids any mutation on conflicts), so server-side attempt
+  tracking does not exist; the value must not be fabricated from
+  `lastSuccessfulSync` — a failed or conflicting attempt can occur after the
+  last success, and equating the two would falsely imply the most recent
+  attempt succeeded. Client-side attempt history lives in the companion's
+  local `status.json`. A future contract version may add server-side
+  attempt/error tracking.
 
 ```typescript
 {
@@ -383,6 +438,23 @@ The server runs strict schema validation before any Redis write:
 The companion runs the same validation locally before sending. A payload that
 passes local validation and fails server validation indicates a contract drift
 and must be surfaced as an error, not silently retried.
+
+**Public-safety content scan.** Beyond schema validation, every string value in
+`data` is scanned before acceptance. The scan rejects at least:
+
+- absolute POSIX paths — `/Users/`, `/home/`, `/var/`, `/tmp/`, and any
+  multi-segment absolute path token
+- Windows drive paths (`C:\...`) and UNC paths (`\\server\...`)
+- `file://` URIs
+- `.md` filename/path fragments
+- forbidden keys at any depth: `body`, `transcript`, `vaultKey`, `path`,
+  `relPath`, `folder`, `fileName`, `fileBase`, `mtime`, `mtimeMs`, `birthtime`
+
+The reference implementation is `tools/public-safety.mjs` (coordinator-owned
+shared infrastructure), locked by `tools/tests/public-safety.test.mjs`. Both
+ingestion endpoints, the companion's local validation, and the fixture
+validator (`tools/validate-projection.mjs`) use this same primitive so they
+cannot drift.
 
 ---
 

@@ -224,3 +224,45 @@ Before marking WS-3 complete:
   documentation and a skill update (external). If the prototype reveals that the
   companion needs a behavioral change, that change is a WS-2 amendment, not a
   WS-3 change.
+
+---
+
+## Coordinator Amendment — contract v1.1.0 (2026-07-12)
+
+*Added under the documented coordinator exception (see CLAUDE.md ownership
+table) after an independent audit and human-approved rulings. Where this
+section conflicts with anything above, **this section and
+`docs/INGESTION_CONTRACT.md` v1.1.0 govern.** Re-read the full contract before
+replanning.*
+
+1. **Emit data, not an envelope.** The Editorial Board skill's artifact is
+   **data-only**: the §2b `data` object plus a source-event timestamp the
+   companion can use for `sourceUpdatedAt`. The skill never chooses
+   `schemaVersion`, `source`, `revision`, or `payloadHash` — the companion
+   (WS-2) owns the entire transport envelope and assigns revisions from its
+   persistent per-endpoint sequence. Replace the original brief's
+   envelope-shaped example accordingly in `docs/EDITORIAL_BOARD_OUTPUT.md`.
+2. **Authority rule: automated output keeps `rulings: []`.** The server
+   rejects every non-empty `rulings` array regardless of `updatedBy` (§2b).
+   `updatedBy: "claude"` is provenance, never authorization. `nextDecision`
+   may describe what needs Pegah's judgment; reviewer recommendations remain
+   advice; **no field may imply Pegah decided something she did not
+   explicitly decide.** Live human rulings await a future human-authorized
+   write path (a versioned contract change) — out of WS-3 scope.
+3. **The direct-POST (curl) fallback is removed.** Never distribute the sync
+   secret to a board-review session. If the companion is offline, the
+   artifact waits in the inbox and is drained when the companion restarts.
+   Delete the fallback option from the delivery-mechanism section of the
+   output contract.
+4. **Inbox-write capability stays a formal research gate.** If the skill
+   cannot write to `~/.studio-inbox/`: do not broaden filesystem permissions,
+   do not move the secret into the board session — return to the Coordinator
+   for a new delivery mechanism.
+5. **Timestamps** in the artifact use the exact `Date.toISOString()` format
+   (§1).
+
+**Adjusted acceptance criteria:** the artifact contains no manuscript body or
+transcript; automated artifacts contain no rulings; the companion assigns
+envelope revision/hash and submits successfully; Iteration shows advice as
+advice; only explicit human decisions (currently: the human-curated fixture)
+ever appear as rulings.

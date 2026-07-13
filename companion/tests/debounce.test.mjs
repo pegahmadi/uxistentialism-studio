@@ -78,7 +78,7 @@ console.log("runNow during a run queues (still single-flight):");
   runner.close();
 }
 
-console.log("Errors do not break the loop:");
+console.log("Errors do not break the loop (code/category only — FIX 12):");
 {
   let runs = 0;
   const lines = [];
@@ -86,12 +86,18 @@ console.log("Errors do not break the loop:");
     debounceMs: 10,
     run: async () => {
       runs += 1;
-      if (runs === 1) throw new Error("boom");
+      if (runs === 1) {
+        // fs-style error whose MESSAGE embeds a private note filename
+        throw Object.assign(new Error("EACCES: permission denied, open '/vault/Private Note.md'"), {
+          code: "EACCES",
+        });
+      }
     },
     logger: { error: (m) => lines.push(m) },
   });
   await runner.runNow();
-  check("error logged", lines.some((l) => l.includes("boom")));
+  check("error code logged", lines.some((l) => l.includes("EACCES")), lines);
+  check("raw error message (with note filename) never logged", lines.every((l) => !l.includes("Private Note.md")), lines);
   await runner.runNow();
   check("runner keeps working after a failed run", runs === 2, runs);
   runner.close();

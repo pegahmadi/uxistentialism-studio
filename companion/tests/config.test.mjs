@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /* Config loader tests (WS-2): mode-600 enforcement, secret non-serializability,
- * generic JSON errors, realpath normalization, defaults. */
+ * generic JSON errors, realpath normalization, defaults, read-only vault
+ * boundary (FIX 6), and studioUrl HTTPS enforcement (FIX 11). */
 
 import { mkdtemp, writeFile, chmod, mkdir, symlink, rm, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -48,7 +49,14 @@ const config = await loadConfig({ configPath: good });
 check("mode 600 accepted", typeof config === "object");
 check("vaultPath realpath-normalized (symlink resolved)", config.vaultPath === (await realpath(vaultReal)), config.vaultPath);
 check("studioUrl trailing slash stripped", config.studioUrl === "https://studio.example.com");
-check("defaults applied", config.debounceMs === 3000 && config.reconcileIntervalMs === 21600000 && config.watchGlob === "UXistentialism/**/*.md");
+check(
+  "defaults applied (watchGlob **/*.md — FIX 5; requestTimeoutMs 30000 — FIX 10)",
+  config.debounceMs === 3000 &&
+    config.reconcileIntervalMs === 21600000 &&
+    config.watchGlob === "**/*.md" &&
+    config.requestTimeoutMs === 30000,
+  { watchGlob: config.watchGlob, requestTimeoutMs: config.requestTimeoutMs },
+);
 check("statusPath derived beside config", config.statusPath === path.join(dir, "status.json"));
 
 console.log("Secret never serializable:");
@@ -95,12 +103,117 @@ for (const field of ["vaultPath", "studioUrl", "syncSecret", "inboxPath"]) {
   }
 }
 
-const badUrl = await writeConfig({ ...base, studioUrl: "ftp://x" }, 0o600, "badurl.json");
-try {
-  await loadConfig({ configPath: badUrl });
-  check("non-http studioUrl refused", false);
-} catch (e) {
-  check("non-http studioUrl refused", e.code === "CONFIG_FIELD");
+console.log("studioUrl HTTPS enforcement (FIX 11):");
+async function tryUrl(studioUrl, name) {
+  const p = await writeConfig({ ...base, studioUrl }, 0o600, name);
+  try {
+    return { ok: true, config: await loadConfig({ configPath: p }) };
+  } catch (e) {
+    return { ok: false, code: e.code, message: e.message };
+  }
+}
+let u = await tryUrl("https://studio.example.com", "url-https.json");
+check("https non-loopback accepted", u.ok);
+u = await tryUrl("http://localhost:3000", "url-localhost.json");
+check("http + localhost accepted (local dev)", u.ok, u.code);
+u = await tryUrl("http://127.0.0.1:8080", "url-loopv4.json");
+check("http + 127.0.0.1 accepted", u.ok, u.code);
+u = await tryUrl("http://[::1]:8080", "url-loopv6.json");
+check("http + [::1] accepted", u.ok, u.code);
+u = await tryUrl("http://studio.example.com", "url-http-remote.json");
+check("http + non-loopback host refused", !u.ok && u.code === "CONFIG_STUDIO_URL", u);
+u = await tryUrl("https://user:pass@studio.example.com", "url-creds.json");
+check("embedded credentials refused", !u.ok && u.code === "CONFIG_STUDIO_URL", u);
+check("credential refusal never echoes the credentials", !u.ok && !u.message.includes("pass"));
+u = await tryUrl("not a url at all", "url-garbage.json");
+check("garbage studioUrl refused", !u.ok && u.code === "CONFIG_STUDIO_URL", u);
+u = await tryUrl("ftp://x", "url-ftp.json");
+check("non-http(s) scheme refused", !u.ok && u.code === "CONFIG_STUDIO_URL", u);
+
+console.log("Read-only vault boundary (FIX 6):");
+{
+  // inboxPath inside the vault
+  const p = await writeConfig({ ...base, inboxPath: path.join(vaultReal, "inbox") }, 0o600, "overlap-inbox.json");
+  try {
+    await loadConfig({ configPath: p });
+    check("inboxPath inside the vault refused", false);
+  } catch (e) {
+    check("inboxPath inside the vault refused", e.code === "CONFIG_VAULT_OVERLAP", e.code);
+  }
+}
+{
+  // inboxPath EQUAL to the vault
+  const p = await writeConfig({ ...base, inboxPath: vaultReal }, 0o600, "overlap-inbox-eq.json");
+  try {
+    await loadConfig({ configPath: p });
+    check("inboxPath equal to the vault refused", false);
+  } catch (e) {
+    check("inboxPath equal to the vault refused", e.code === "CONFIG_VAULT_OVERLAP", e.code);
+  }
+}
+{
+  // inboxPath whose (not-yet-existing) parent is a symlink into the vault
+  await mkdir(path.join(vaultReal, "05 Signals"), { recursive: true });
+  const linkedParent = path.join(dir, "sneaky-link");
+  await symlink(path.join(vaultReal, "05 Signals"), linkedParent);
+  const p = await writeConfig(
+    { ...base, inboxPath: path.join(linkedParent, "new-inbox") },
+    0o600,
+    "overlap-symlink.json",
+  );
+  try {
+    await loadConfig({ configPath: p });
+    check("symlinked parent resolving into the vault refused", false);
+  } catch (e) {
+    check("symlinked parent resolving into the vault refused", e.code === "CONFIG_VAULT_OVERLAP", e.code);
+  }
+}
+{
+  // config file (and therefore status.json) inside the vault
+  const inVault = path.join(vaultReal, "config.json");
+  await writeFile(inVault, JSON.stringify(base));
+  await chmod(inVault, 0o600);
+  try {
+    await loadConfig({ configPath: inVault });
+    check("config file inside the vault refused (statusPath covered too)", false);
+  } catch (e) {
+    check("config file inside the vault refused (statusPath covered too)", e.code === "CONFIG_VAULT_OVERLAP", e.code);
+  }
+  await rm(inVault, { force: true });
+}
+{
+  // logPath inside the vault
+  const p = await writeConfig(
+    { ...base, logPath: path.join(vaultReal, "companion.log") },
+    0o600,
+    "overlap-log.json",
+  );
+  try {
+    await loadConfig({ configPath: p });
+    check("logPath inside the vault refused", false);
+  } catch (e) {
+    check("logPath inside the vault refused", e.code === "CONFIG_VAULT_OVERLAP", e.code);
+  }
+}
+
+console.log("watchGlob traversal safety (FIX 6):");
+for (const [glob, label] of [
+  ["../elsewhere/**/*.md", "leading .. traversal"],
+  ["a/../../b/*.md", "embedded .. traversal"],
+  ["/Users/elsewhere/**/*.md", "absolute glob"],
+]) {
+  const p = await writeConfig({ ...base, watchGlob: glob }, 0o600, `glob-${label.replaceAll(" ", "-")}.json`);
+  try {
+    await loadConfig({ configPath: p });
+    check(`${label} refused`, false);
+  } catch (e) {
+    check(`${label} refused`, e.code === "CONFIG_WATCH_GLOB", e.code);
+  }
+}
+for (const glob of ["**/*.md", "02 Concepts (Ontology)/**/*.md", "notes/*.md"]) {
+  const p = await writeConfig({ ...base, watchGlob: glob }, 0o600, `glob-ok-${glob.length}.json`);
+  const c = await loadConfig({ configPath: p });
+  check(`relative glob "${glob}" accepted`, c.watchGlob === glob);
 }
 
 await rm(dir, { recursive: true, force: true });

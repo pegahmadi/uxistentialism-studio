@@ -9,6 +9,7 @@
     "test": "node tests/run.mjs"
   },
   "dependencies": {
-    "chokidar": "^3.6.0"
+    "chokidar": "^3.6.0",
+    "picomatch": "^2.3.1"
   }
 }

@@ -58,11 +58,18 @@ async function main() {
     process.exit(1);
   }
   const inboxPath = await realpath(config.inboxPath); // normalized after creation
+  // FIX 6 — re-verify after creation/realpath: a symlinked inbox must not
+  // resolve into the read-only vault.
+  if (inboxPath === config.vaultPath || inboxPath.startsWith(config.vaultPath + "/")) {
+    logger.error("startup failed: inboxPath resolves inside the vault — the vault is read-only");
+    process.exit(1);
+  }
 
   const status = await createStatusStore({ statusPath: config.statusPath, logger });
   const ingestor = createIngestor({
     studioUrl: config.studioUrl,
     syncSecret: config.syncSecret,
+    requestTimeoutMs: config.requestTimeoutMs,
     logger,
   });
   const pipeline = createSyncPipeline({ config, status, ingestor, logger });

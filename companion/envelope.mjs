@@ -11,7 +11,7 @@
  */
 
 import { substantiveHash } from "../tools/canonical-hash.mjs";
-import { ISO_EXACT } from "./validator.mjs";
+import { isExactIsoTimestamp } from "./validator.mjs";
 
 export const SCHEMA_VERSION = 1;
 export const SOURCES = Object.freeze(["companion", "editorial-board-inbox"]);
@@ -28,8 +28,9 @@ export function buildEnvelope({ source, sourceUpdatedAt, data, revision, now = D
   if (!SOURCES.includes(source)) {
     throw new Error(`invalid envelope source "${source}"`);
   }
-  if (typeof sourceUpdatedAt !== "string" || !ISO_EXACT.test(sourceUpdatedAt)) {
-    throw new Error("sourceUpdatedAt must be exact Date.toISOString() format (§1)");
+  // FIX 9 — regex AND round-trip: impossible dates (2026-02-31…) are refused.
+  if (!isExactIsoTimestamp(sourceUpdatedAt)) {
+    throw new Error("sourceUpdatedAt must be exact Date.toISOString() format and a real instant (§1)");
   }
   if (!Number.isInteger(revision) || revision < 1) {
     throw new Error("revision must be an integer >= 1 (§1)");
@@ -37,11 +38,18 @@ export function buildEnvelope({ source, sourceUpdatedAt, data, revision, now = D
   // §1b JSON-safety guard + hash in one step: throws on non-JSON values.
   const payloadHash = substantiveHash(data);
 
+  // Constructed timestamps are validated too (FIX 9): an invalid `now` must
+  // fail here, not on the wire.
+  const projectedAt = new Date(now).toISOString(); // throws RangeError on invalid `now`
+  if (!isExactIsoTimestamp(projectedAt)) {
+    throw new Error("projectedAt did not round-trip as an exact Date.toISOString() timestamp (§1)");
+  }
+
   return {
     schemaVersion: SCHEMA_VERSION,
     source,
     sourceUpdatedAt,
-    projectedAt: new Date(now).toISOString(),
+    projectedAt,
     revision,
     payloadHash,
     data,

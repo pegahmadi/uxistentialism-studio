@@ -59,7 +59,16 @@ try {
 } catch {
   check("companion never claims studio-ui source", true);
 }
-for (const badIso of ["2026-07-12T09:59:00Z", "2026-07-12 09:59:00.000Z", "2026-07-12T09:59:00.000+00:00", null]) {
+// FIX 9 — impossible dates match the format regex but fail the round-trip.
+for (const badIso of [
+  "2026-07-12T09:59:00Z",
+  "2026-07-12 09:59:00.000Z",
+  "2026-07-12T09:59:00.000+00:00",
+  "2026-02-31T09:59:00.000Z", // impossible day
+  "2026-13-01T09:59:00.000Z", // impossible month
+  "2026-07-12T24:59:00.000Z", // impossible hour
+  null,
+]) {
   try {
     buildEnvelope({ source: "companion", sourceUpdatedAt: badIso, data, revision: 1 });
     check(`non-exact ISO rejected (${badIso})`, false);

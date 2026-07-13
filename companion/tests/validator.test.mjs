@@ -62,9 +62,12 @@ check("exactly-at-limit strings pass", violationsFor((d) => {
   d.nextDecision = "x".repeat(300);
 }).length === 0);
 
-console.log("§2b mirror — timestamps (§1 exact format):");
+console.log("§2b mirror — timestamps (§1 exact format + round-trip, FIX 9):");
 check("reviewedAt without ms rejected", violationsFor((d) => (d.reviewedAt = "2026-07-12T18:04:07Z")).some((m) => m.includes("reviewedAt")));
 check("updatedAt with offset rejected", violationsFor((d) => (d.updatedAt = "2026-07-12T18:04:07.123+00:00")).some((m) => m.includes("updatedAt")));
+check("impossible reviewedAt date rejected (Feb 31)", violationsFor((d) => (d.reviewedAt = "2026-02-31T10:00:00.000Z")).some((m) => m.includes("reviewedAt")));
+check("impossible updatedAt month rejected (month 13)", violationsFor((d) => (d.updatedAt = "2026-13-01T10:00:00.000Z")).some((m) => m.includes("updatedAt")));
+check("valid leap-day accepted (2028-02-29)", violationsFor((d) => (d.reviewedAt = "2028-02-29T10:00:00.000Z")).length === 0);
 
 console.log("§2b mirror — public-safety scan (§5, redacted):");
 v = violationsFor((d) => (d.reviewers[0].diagnosis = "See /Users/pegah/notes/x for detail"));
@@ -83,6 +86,9 @@ check("missing sourceUpdatedAt rejected (never mtime-substituted)", validateInbo
 a = validArtifact();
 a.sourceUpdatedAt = "2026-07-12T18:04:07Z";
 check("malformed sourceUpdatedAt rejected", validateInboxArtifact(a).some((m) => m.includes("sourceUpdatedAt")));
+a = validArtifact();
+a.sourceUpdatedAt = "2026-02-31T18:04:07.123Z";
+check("impossible sourceUpdatedAt date rejected (FIX 9)", validateInboxArtifact(a).some((m) => m.includes("sourceUpdatedAt")));
 a = validArtifact();
 delete a.data;
 check("missing data rejected", validateInboxArtifact(a).some((m) => m.includes("data")));
@@ -121,8 +127,55 @@ try {
   });
   check("summary > 500 rejected (§2a)", !r.ok && r.violations.some((m) => m.includes("500")));
 
+  // FIX 8 — strict §2a: the shared validator's legacy tolerance for `source`
+  // is NOT relied on; the strict mirror rejects it and every unknown field.
   r = await validateObsidianData({ data: { ...goodData, source: "companion" }, vaultPath: root, allowlistPath });
-  check("source field inside data tolerated by fixture validator shape but is never emitted by the projector", r.ok !== undefined);
+  check("data.source rejected by the strict §2a layer (FIX 8)", !r.ok && r.violations.some((m) => m.includes('"source"')), r.violations);
+
+  r = await validateObsidianData({ data: { ...goodData, extra: 1 }, vaultPath: root, allowlistPath });
+  check("unknown top-level field rejected", !r.ok && r.violations.some((m) => m.includes('"extra"')));
+
+  r = await validateObsidianData({
+    data: { ...goodData, concepts: [{ ...goodData.concepts[0], vaultKey: "alpha" }] },
+    vaultPath: root,
+    allowlistPath,
+  });
+  check("unknown concept field rejected at depth", !r.ok && r.violations.some((m) => m.includes('"vaultKey"')));
+
+  r = await validateObsidianData({
+    data: { ...goodData, connections: [{ from: "alpha", to: "beta", weight: 3 }] },
+    vaultPath: root,
+    allowlistPath,
+  });
+  check("unknown connection field rejected", !r.ok && r.violations.some((m) => m.includes('"weight"')));
+
+  r = await validateObsidianData({
+    data: { ...goodData, emerging: [{ term: "gamma missing", references: 1, note: "x" }] },
+    vaultPath: root,
+    allowlistPath,
+  });
+  check("unknown emerging field rejected", !r.ok && r.violations.some((m) => m.includes('"note"')));
+
+  {
+    const missingField = { ...goodData };
+    delete missingField.connections;
+    r = await validateObsidianData({ data: missingField, vaultPath: root, allowlistPath });
+    check("missing required §2a field rejected", !r.ok && r.violations.some((m) => m.includes('"connections"')));
+  }
+
+  r = await validateObsidianData({
+    data: { ...goodData, concepts: [{ ...goodData.concepts[0], backlinks: "2" }] },
+    vaultPath: root,
+    allowlistPath,
+  });
+  check("wrong §2a field type rejected (backlinks string)", !r.ok && r.violations.some((m) => m.includes("backlinks")));
+
+  r = await validateObsidianData({
+    data: { ...goodData, generatedAt: "2026-02-31T10:00:00.000Z" },
+    vaultPath: root,
+    allowlistPath,
+  });
+  check("impossible generatedAt rejected (FIX 9)", !r.ok && r.violations.some((m) => m.includes("generatedAt")));
 
   r = await validateObsidianData({
     data: { ...goodData, concepts: [{ ...goodData.concepts[0], id: "not-allowlisted" }] },

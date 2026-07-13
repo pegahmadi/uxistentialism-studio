@@ -1,10 +1,18 @@
 /*
  * Companion-side validation (WS-2).
  *
- * Obsidian projections: validated IN MEMORY through the shared
- * tools/validate-projection.mjs bridge (contract v1.1.1 — no temp files),
- * plus the §2a constraints the fixture validator does not cover
- * (non-empty concepts, 500-char summary cap).
+ * Obsidian projections: validated IN MEMORY through two layers that BOTH run
+ * on every sync (FIX 8):
+ *   1. the shared tools/validate-projection.mjs bridge (contract v1.1.1 —
+ *      no temp files) as the allowlist/public-safety layer, and
+ *   2. a STRICT companion-side §2a schema mirror matching the server: exact
+ *      field sets at every level (data.source and every unknown field
+ *      rejected — the shared validator's legacy tolerance is not relied on),
+ *      required fields/types, non-empty concepts, 500-char summary cap.
+ *
+ * Timestamps (FIX 9): every timestamp check is regex AND round-trip —
+ * new Date(Date.parse(t)).toISOString() === t — so impossible dates
+ * ("2026-02-31…") are rejected even though they match the format regex.
  *
  * Editorial Board data: an in-module mirror of contract §2b, including the
  * v1 authority rules (non-empty `rulings` rejected; `manuscript.status`
@@ -24,9 +32,120 @@ import { scanPublicSafety } from "../tools/public-safety.mjs";
 
 export const ISO_EXACT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
+/**
+ * FIX 9 — exact-format AND round-trip timestamp check. The regex alone admits
+ * impossible dates ("2026-02-31T…"); the round-trip rejects them.
+ */
+export function isExactIsoTimestamp(v) {
+  if (typeof v !== "string" || !ISO_EXACT.test(v)) return false;
+  const ms = Date.parse(v);
+  return Number.isFinite(ms) && new Date(ms).toISOString() === v;
+}
+
 const isPlainObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 
 // ---------------------------------------------------------------- Obsidian
+
+// FIX 8 — strict §2a field sets (server parity). Note: NO "source" at the top
+// level — the shared fixture validator tolerates it for legacy fixtures; the
+// live submission path must not.
+const OBSIDIAN_DATA_FIELDS = ["generatedAt", "concepts", "connections", "emerging"];
+const OBSIDIAN_CONCEPT_FIELDS = ["id", "title", "kind", "category", "summary", "presentIn", "backlinks"];
+const OBSIDIAN_CONNECTION_FIELDS = ["from", "to"];
+const OBSIDIAN_EMERGING_FIELDS = ["term", "references"];
+
+function exactFields(obj, allowed, where, add) {
+  for (const k of Object.keys(obj)) {
+    if (!allowed.includes(k)) add(`${where}: unknown field "${k}" (§2a rejects unknown fields)`);
+  }
+  for (const k of allowed) {
+    if (!(k in obj)) add(`${where}: missing required field "${k}" (§2a)`);
+  }
+}
+
+/**
+ * FIX 8 — strict companion-side §2a schema mirror (server parity). Runs in
+ * ADDITION to the shared allowlist/public-safety validator; it never relies
+ * on that validator's legacy tolerance for `source`.
+ * @param {unknown} data
+ * @returns {string[]} violations (empty = valid)
+ */
+export function validateObsidianDataStrict(data) {
+  const violations = [];
+  const add = (m) => violations.push(m);
+
+  if (!isPlainObject(data)) return ["projection data must be a JSON object (§2a)"];
+
+  exactFields(data, OBSIDIAN_DATA_FIELDS, "data", add);
+
+  if ("generatedAt" in data && !isExactIsoTimestamp(data.generatedAt)) {
+    add("data.generatedAt must be exact Date.toISOString() format and a real instant (§1/§2a)");
+  }
+
+  if (Array.isArray(data.concepts)) {
+    if (data.concepts.length === 0) add("data.concepts must contain at least one entry (§2a)");
+    data.concepts.forEach((c, i) => {
+      const where = `data.concepts[${i}]`;
+      if (!isPlainObject(c)) {
+        add(`${where} must be an object`);
+        return;
+      }
+      exactFields(c, OBSIDIAN_CONCEPT_FIELDS, where, add);
+      for (const k of ["id", "title", "kind", "category", "summary"]) {
+        if (k in c && typeof c[k] !== "string") add(`${where}.${k} must be a string`);
+      }
+      if (typeof c.summary === "string" && c.summary.length > 500) {
+        add(`${where}.summary exceeds 500 characters (§2a)`);
+      }
+      if ("presentIn" in c) {
+        if (!Array.isArray(c.presentIn)) add(`${where}.presentIn must be an array`);
+        else if (c.presentIn.some((p) => typeof p !== "string")) {
+          add(`${where}.presentIn entries must be strings`);
+        }
+      }
+      if ("backlinks" in c && (typeof c.backlinks !== "number" || !Number.isFinite(c.backlinks))) {
+        add(`${where}.backlinks must be a number`);
+      }
+    });
+  } else if ("concepts" in data) {
+    add("data.concepts must be an array");
+  }
+
+  if (Array.isArray(data.connections)) {
+    data.connections.forEach((e, i) => {
+      const where = `data.connections[${i}]`;
+      if (!isPlainObject(e)) {
+        add(`${where} must be an object`);
+        return;
+      }
+      exactFields(e, OBSIDIAN_CONNECTION_FIELDS, where, add);
+      for (const k of OBSIDIAN_CONNECTION_FIELDS) {
+        if (k in e && typeof e[k] !== "string") add(`${where}.${k} must be a string`);
+      }
+    });
+  } else if ("connections" in data) {
+    add("data.connections must be an array");
+  }
+
+  if (Array.isArray(data.emerging)) {
+    data.emerging.forEach((em, i) => {
+      const where = `data.emerging[${i}]`;
+      if (!isPlainObject(em)) {
+        add(`${where} must be an object`);
+        return;
+      }
+      exactFields(em, OBSIDIAN_EMERGING_FIELDS, where, add);
+      if ("term" in em && typeof em.term !== "string") add(`${where}.term must be a string`);
+      if ("references" in em && (typeof em.references !== "number" || !Number.isFinite(em.references))) {
+        add(`${where}.references must be a number`);
+      }
+    });
+  } else if ("emerging" in data) {
+    add("data.emerging must be an array");
+  }
+
+  return violations;
+}
 
 /**
  * @param {object} opts
@@ -36,23 +155,16 @@ const isPlainObject = (v) => v !== null && typeof v === "object" && !Array.isArr
  * @returns {Promise<{ ok: boolean, violations: string[] }>}
  */
 export async function validateObsidianData({ data, vaultPath, allowlistPath }) {
+  // Layer 1 — shared allowlist/public-safety validator (in memory).
   const { violations } = await validateProjection({
     projection: data,
     vaultPath,
     ...(allowlistPath ? { allowlistPath } : {}),
   });
-  const all = [...violations];
 
-  // §2a constraints beyond the shared fixture validator.
-  if (!Array.isArray(data?.concepts) || data.concepts.length === 0) {
-    all.push("concepts must contain at least one entry (§2a)");
-  } else {
-    data.concepts.forEach((c, i) => {
-      if (typeof c?.summary === "string" && c.summary.length > 500) {
-        all.push(`concepts[${i}].summary exceeds 500 characters (§2a)`);
-      }
-    });
-  }
+  // Layer 2 (FIX 8) — strict §2a schema mirror; never relies on the shared
+  // validator's legacy tolerance (e.g. it rejects data.source outright).
+  const all = [...violations, ...validateObsidianDataStrict(data)];
 
   return { ok: all.length === 0, violations: all };
 }
@@ -97,9 +209,8 @@ function checkString(obj, key, where, add, { max } = {}) {
 }
 
 function checkExactIso(obj, key, where, add) {
-  const v = obj[key];
-  if (key in obj && (typeof v !== "string" || !ISO_EXACT.test(v))) {
-    add(`${where}.${key} must be exact Date.toISOString() format (§1)`);
+  if (key in obj && !isExactIsoTimestamp(obj[key])) {
+    add(`${where}.${key} must be exact Date.toISOString() format and a real instant (§1)`);
   }
 }
 
@@ -207,8 +318,8 @@ export function validateInboxArtifact(artifact) {
       violations.push(`inbox artifact: unknown top-level key "${k}" (must be exactly sourceUpdatedAt + data)`);
     }
   }
-  if (typeof artifact.sourceUpdatedAt !== "string" || !ISO_EXACT.test(artifact.sourceUpdatedAt)) {
-    violations.push("inbox artifact: sourceUpdatedAt missing or not exact Date.toISOString() format (mtime is never substituted)");
+  if (!isExactIsoTimestamp(artifact.sourceUpdatedAt)) {
+    violations.push("inbox artifact: sourceUpdatedAt missing, not exact Date.toISOString() format, or not a real instant (mtime is never substituted)");
   }
   if (!("data" in artifact)) {
     violations.push("inbox artifact: missing data");

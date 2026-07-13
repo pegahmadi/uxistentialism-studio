@@ -35,7 +35,7 @@ function makeServer(scriptFn) {
   });
 }
 
-async function makeStack(serverUrl, { statusFile, projectFn } = {}) {
+async function makeStack(serverUrl, { statusFile, projectFn, allowlistPath: allowOverride } = {}) {
   const lines = [];
   const logger = createLogger({
     redactions: [[SECRET, "[redacted-secret]"], [vaultPath, "[vault]"]],
@@ -46,8 +46,9 @@ async function makeStack(serverUrl, { statusFile, projectFn } = {}) {
   });
   const status = await createStatusStore({ statusPath: path.join(stateDir, statusFile ?? "status.json"), logger });
   const ingestor = createIngestor({ studioUrl: serverUrl, syncSecret: SECRET, logger, sleep: async () => {} });
-  // config-shaped object; allowlistPath threaded through a wrapped projectFn
-  const config = { vaultPath, studioUrl: serverUrl };
+  // config-shaped object; allowlistPath (when set) makes the pipeline validate
+  // against the synthetic allowlist instead of the repo one
+  const config = { vaultPath, studioUrl: serverUrl, ...(allowOverride ? { allowlistPath: allowOverride } : {}) };
   const pipeline = createSyncPipeline({
     config,
     status,
@@ -81,6 +82,39 @@ console.log("Validation failure blocks submission (no HTTP request):");
   check("status records the failure without submission", status.get("obsidianProjection").lastError?.includes("validation failed"));
   check("violations logged (redacted)", lines.some((l) => l.includes("projection validation:")));
   check("revision not consumed", status.nextRevision("obsidianProjection") === 1);
+  await server.close();
+}
+
+console.log("FIX 8 — strict §2a: a projection carrying data.source never reaches HTTP:");
+{
+  const server = await makeServer();
+  // Real synthetic projection, valid against the synthetic allowlist, with a
+  // `source` field injected — the ONLY defect. The shared fixture validator
+  // tolerates `source` (legacy fixtures); the strict layer must reject it
+  // before any request is made.
+  const projectWithSource = async ({ vaultPath: vp }) => {
+    const projection = await project({ vaultPath: vp, allowlistPath });
+    projection.data.source = "companion";
+    return projection;
+  };
+  const { pipeline, status, lines } = await makeStack(server.url, {
+    statusFile: "s-strict-source.json",
+    projectFn: projectWithSource,
+    allowlistPath,
+  });
+
+  // Baseline: the same stack WITHOUT the injected field submits fine, so the
+  // failure below is attributable to `source` alone.
+  const clean = await makeStack(server.url, { statusFile: "s-strict-clean.json", projectFn: projectSynthetic, allowlistPath });
+  const okRun = await clean.pipeline.syncObsidian();
+  check("baseline synthetic projection passes strict validation and submits", okRun.outcome === "success", okRun);
+  const requestsBefore = server.requests.length;
+
+  const r = await pipeline.syncObsidian();
+  check("source-carrying projection → validation-error", r.outcome === "validation-error", r.outcome);
+  check("no HTTP request for the source-carrying projection", server.requests.length === requestsBefore, server.requests.length - requestsBefore);
+  check("violation names the source field", lines.some((l) => l.includes('"source"')), lines.filter((l) => l.includes("validation")));
+  check("status records the failure", status.get("obsidianProjection").lastError?.includes("validation failed"));
   await server.close();
 }
 

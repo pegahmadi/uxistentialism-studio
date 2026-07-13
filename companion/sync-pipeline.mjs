@@ -68,10 +68,9 @@ export function createSyncPipeline({ config, status, ingestor, logger, projectFn
     try {
       projection = await projectFn({ vaultPath: config.vaultPath });
     } catch (e) {
-      const msg =
-        e instanceof VaultError
-          ? `projection failed (${e.code})`
-          : `projection failed: ${e?.message ?? "unknown error"}`;
+      // Code/category only (FIX 12): non-VaultError messages (fs errors) can
+      // embed note filenames or paths.
+      const msg = `projection failed (${e instanceof VaultError ? e.code : (e?.code ?? e?.name ?? "unknown error")})`;
       await status.recordError("obsidianProjection", msg);
       logger.error(msg);
       return { outcome: "projection-error" };
@@ -80,6 +79,7 @@ export function createSyncPipeline({ config, status, ingestor, logger, projectFn
     const { ok, violations } = await validateObsidianData({
       data: projection.data,
       vaultPath: config.vaultPath,
+      ...(config.allowlistPath ? { allowlistPath: config.allowlistPath } : {}),
     });
     if (!ok) {
       await status.recordError(

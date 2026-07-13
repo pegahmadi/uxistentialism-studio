@@ -16,8 +16,10 @@
  *
  * Editorial Board data: an in-module mirror of contract §2b, including the
  * v1 authority rules (non-empty `rulings` rejected; `manuscript.status`
- * "complete" rejected), exact-field/unknown-field enforcement, max lengths,
- * exact toISOString timestamps, and the shared §5 public-safety content scan.
+ * "complete" rejected), the v1.1.2 provenance rules (updatedBy pinned to
+ * "claude", sourceLabel pinned to the exact automated label), exact-field/
+ * unknown-field enforcement, max lengths, exact toISOString timestamps, and
+ * the shared §5 public-safety content scan.
  *
  * Inbox artifacts: exactly { sourceUpdatedAt, data } — any other top-level
  * key, or a missing/malformed sourceUpdatedAt, is a violation (the companion
@@ -53,6 +55,18 @@ const OBSIDIAN_DATA_FIELDS = ["generatedAt", "concepts", "connections", "emergin
 const OBSIDIAN_CONCEPT_FIELDS = ["id", "title", "kind", "category", "summary", "presentIn", "backlinks"];
 const OBSIDIAN_CONNECTION_FIELDS = ["from", "to"];
 const OBSIDIAN_EMERGING_FIELDS = ["term", "references"];
+
+/**
+ * §2a slug parity: concept ids are slug-style identifiers — never filenames,
+ * never vault paths. Non-empty, no whitespace, no "/" or "\", no ".md"
+ * fragment (the server enforces the same rule independently).
+ */
+const isSlugId = (id) =>
+  id.length > 0 &&
+  !/\s/.test(id) &&
+  !id.includes("/") &&
+  !id.includes("\\") &&
+  !id.toLowerCase().includes(".md");
 
 function exactFields(obj, allowed, where, add) {
   for (const k of Object.keys(obj)) {
@@ -93,6 +107,10 @@ export function validateObsidianDataStrict(data) {
       exactFields(c, OBSIDIAN_CONCEPT_FIELDS, where, add);
       for (const k of ["id", "title", "kind", "category", "summary"]) {
         if (k in c && typeof c[k] !== "string") add(`${where}.${k} must be a string`);
+      }
+      if (typeof c.id === "string" && !isSlugId(c.id)) {
+        // Redacted by construction: names the field and the rule, never the value.
+        add(`${where}.id must be a slug-style identifier (non-empty, no whitespace, no path separators, no ".md" fragment) (§2a)`);
       }
       if (typeof c.summary === "string" && c.summary.length > 500) {
         add(`${where}.summary exceeds 500 characters (§2a)`);
@@ -187,6 +205,20 @@ const REVIEWER_FIELDS = ["role", "diagnosis", "recommendation", "confidence"];
 const MANUSCRIPT_STATUSES = new Set(["in review", "awaiting ruling", "complete"]);
 const CONFIDENCE = new Set(["high", "medium", "low"]);
 const UPDATED_BY = new Set(["claude", "human"]);
+
+/*
+ * v1.1.2 provenance parity (local mirror; the server enforces this
+ * independently). Live submissions are automated Editorial Board output, so
+ * BOTH provenance fields are pinned exactly:
+ *   updatedBy   === "claude"
+ *   sourceLabel === "Claude Editorial Board · automated"
+ * The label's separator is U+00B7 MIDDLE DOT — a normal hyphen, extra
+ * whitespace, or any suffix is a different provenance claim and is rejected
+ * BEFORE any HTTP request is made. Human-attributed artifacts have no
+ * automated write path (same rationale as the §2b rulings/status rules).
+ */
+const AUTOMATED_UPDATED_BY = "claude";
+const AUTOMATED_SOURCE_LABEL = "Claude Editorial Board · automated";
 
 function checkExactFields(obj, allowed, where, add) {
   for (const k of Object.keys(obj)) {
@@ -292,8 +324,21 @@ export function validateEditorialBoardData(data) {
 
   checkString(data, "nextDecision", "data", add, { max: 300 });
   checkString(data, "sourceLabel", "data", add);
-  if ("updatedBy" in data && !UPDATED_BY.has(data.updatedBy)) {
-    add('data.updatedBy must be "claude" | "human"');
+  // v1.1.2 provenance parity — exact label, U+00B7 middle dot included.
+  if (typeof data.sourceLabel === "string" && data.sourceLabel !== AUTOMATED_SOURCE_LABEL) {
+    add(
+      `data.sourceLabel must be exactly "${AUTOMATED_SOURCE_LABEL}" on live submissions (§2b v1.1.2 provenance rule)`,
+    );
+  }
+  if ("updatedBy" in data) {
+    if (!UPDATED_BY.has(data.updatedBy)) {
+      add('data.updatedBy must be "claude" | "human"');
+    } else if (data.updatedBy !== AUTOMATED_UPDATED_BY) {
+      // v1.1.2 provenance parity — live submissions are automated output.
+      add(
+        'data.updatedBy must be "claude" on live submissions — human-attributed artifacts have no automated write path (§2b v1.1.2 provenance rule)',
+      );
+    }
   }
 
   // Shared §5 public-safety content scan (redacted messages by construction).

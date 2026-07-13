@@ -1,9 +1,11 @@
 /*
  * Vault watcher (WS-2): chokidar + debounce + single-flight queue.
  *
- * - Watches the vault ROOT (read-only, { persistent, ignoreInitial }) and
+ * - Watches the vault ROOT (read-only, { persistent, ignoreInitial },
+ *   followSymlinks: false — the projector never traverses symlinks either) and
  *   filters events against the vault-relative watchGlob (default "**\/*.md")
- *   plus the projector's skip set (VAULT_SKIP_FOLDERS + dot-dirs), so the
+ *   plus the projector's skip set (VAULT_SKIP_FOLDERS + dot-DIRECTORIES;
+ *   dot-FILES are watched, exactly as the projector reads them), so the
  *   watcher and the projector agree about which notes exist.
  * - add/change/unlink events reset a debounce timer; when it fires, one sync
  *   runs. Deletions matter: an unlinked allowlisted note must leave the
@@ -24,8 +26,8 @@ import chokidar from "chokidar";
 
 /**
  * Mirrors the projector's DEFAULT_SKIP (tools/vault-audit/_shared.mjs). The
- * projector additionally skips every dot-directory; the filter below applies
- * the same rule via the segment dot-check.
+ * projector additionally skips every dot-DIRECTORY; the filter below applies
+ * the same rule via the directory-segment dot-check.
  */
 export const VAULT_SKIP_FOLDERS = Object.freeze([
   ".obsidian",
@@ -36,8 +38,13 @@ export const VAULT_SKIP_FOLDERS = Object.freeze([
   "Templates",
 ]);
 
-const hasSkippedSegment = (segments) =>
-  segments.some((s) => s.startsWith(".") || VAULT_SKIP_FOLDERS.includes(s));
+/*
+ * PROJECTOR PARITY: the projector's walk() applies BOTH exclusions (dot-prefix
+ * and the skip set) only when the entry is a directory — dot-FILES like
+ * ".hidden-note.md" are still read. So both checks apply to DIRECTORY segments
+ * only; the final filename segment may start with ".".
+ */
+const isSkippedDirSegment = (s) => s.startsWith(".") || VAULT_SKIP_FOLDERS.includes(s);
 
 /**
  * Pure event filter: does an absolute fs path represent a watched note?
@@ -48,13 +55,15 @@ export function createVaultEventFilter({ vaultPath, watchGlob }) {
   // "02 Concepts (Ontology)", and treating them as extglob metacharacters
   // would silently match nothing. *, ?, [], {} keep their glob meaning.
   const literalized = watchGlob.replace(/[()|]/g, "\\$&");
-  const match = picomatch(literalized, { dot: false });
+  // dot:true — dot-file exclusion is handled by the directory-segment check
+  // below (projector parity: dot-directories are skipped, dot-files are not).
+  const match = picomatch(literalized, { dot: true });
   return (absPath) => {
     if (typeof absPath !== "string" || absPath.length === 0) return false;
     const rel = path.relative(vaultPath, absPath);
     if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) return false; // outside the vault
     const segments = rel.split(path.sep);
-    if (hasSkippedSegment(segments)) return false;
+    if (segments.slice(0, -1).some(isSkippedDirSegment)) return false;
     return match(segments.join("/"));
   };
 }
@@ -124,10 +133,23 @@ export function createVaultWatcher({ vaultPath, watchGlob, debounceMs, onSync, l
   const watcher = chokidar.watch(vaultPath, {
     persistent: true,
     ignoreInitial: true,
+    // PROJECTOR PARITY: walk() uses readdir Dirents, and a directory symlink
+    // is never isDirectory(), so the projector does not traverse symlinks.
+    // The watcher must not either — otherwise an in-vault symlink could pull
+    // filesystem locations OUTSIDE the vault into the watch set.
+    followSymlinks: false,
     ignored: (watchedPath) => {
       const rel = path.relative(vaultPath, watchedPath);
       if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) return false;
-      return hasSkippedSegment(rel.split(path.sep));
+      const segments = rel.split(path.sep);
+      if (segments.slice(0, -1).some(isSkippedDirSegment)) return true;
+      const last = segments[segments.length - 1];
+      // The final segment is a directory-or-file we can't cheaply stat here:
+      // prune it when it is a known skip-folder name, or when it is
+      // dot-prefixed and cannot be a watched note (dot-FILES like
+      // ".hidden-note.md" must survive traversal — projector parity).
+      if (VAULT_SKIP_FOLDERS.includes(last)) return true;
+      return last.startsWith(".") && !last.toLowerCase().endsWith(".md");
     },
   });
 

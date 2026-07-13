@@ -12,20 +12,50 @@ import { Redis } from "@upstash/redis";
 
 let client: Redis | null | undefined; // undefined = not yet constructed
 
+// Accepted env-var name pairs, in precedence order (contract §8, v1.1.3).
+// Pair resolution is ATOMIC: a pair is used only when BOTH of its names are
+// present and non-empty; URL and token are never mixed across schemes, and a
+// partial higher-precedence pair is skipped in favor of a complete lower one.
+//   1. Canonical @upstash/redis names.
+//   2. The deployed Vercel Marketplace binding (created 2026-07-12 with a
+//      Custom Prefix of UPSTASH_REDIS_REST, which the Marketplace PREPENDS to
+//      its native KV_REST_API_* names; the binding cannot be safely recreated
+//      through the confirmed UI, so the generated names are supported as a
+//      documented deployment reality).
+// TCP and read-only variables (REDIS_URL, KV_URL, *_READ_ONLY_*) are
+// deliberately never consumed.
+const ENV_PAIRS: ReadonlyArray<readonly [string, string]> = [
+  ["UPSTASH_REDIS_REST_URL", "UPSTASH_REDIS_REST_TOKEN"],
+  ["UPSTASH_REDIS_REST_KV_REST_API_URL", "UPSTASH_REDIS_REST_KV_REST_API_TOKEN"],
+];
+
+/**
+ * First COMPLETE pair wins. Returns null when no scheme is complete. Names
+ * only — never logs values. Exported so tests can assert precedence without
+ * introspecting the (circular) Redis client object.
+ */
+export function resolveRedisConfig(): { url: string; token: string } | null {
+  for (const [urlName, tokenName] of ENV_PAIRS) {
+    const url = process.env[urlName];
+    const token = process.env[tokenName];
+    if (url && token) return { url, token }; // pair-atomic: both from the SAME scheme
+  }
+  return null;
+}
+
 /** Lazy singleton. Returns null (fallback condition) when config is absent or malformed. */
 export function getRedis(): Redis | null {
   if (client !== undefined) return client;
-  const url = process.env.UPSTASH_REDIS_REST_URL;
-  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
-  if (!url || !token) {
+  const config = resolveRedisConfig();
+  if (!config) {
     client = null;
     return client;
   }
   try {
-    new URL(url); // malformed URL → fallback, not a crash
+    new URL(config.url); // malformed URL → fallback, not a crash
     // Raw string values in/out: the Lua script reads and writes plain JSON
     // strings, so readers parse explicitly and the fake test client stays honest.
-    client = new Redis({ url, token, automaticDeserialization: false });
+    client = new Redis({ url: config.url, token: config.token, automaticDeserialization: false });
   } catch {
     client = null;
   }

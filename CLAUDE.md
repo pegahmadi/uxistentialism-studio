@@ -233,8 +233,7 @@ Redis key ownership: see `docs/INGESTION_CONTRACT.md`.
 ## Last updated
 
 2026-07-12 · updatedBy: claude (coordinator amendments after independent audit)
-reviewedBy: human — pending review (v1.1.2 corrections under review; v1.1.1
-through a6e6d42 approved 2026-07-12)
+reviewedBy: human · 2026-07-12 (contract v1.1.2 through e538c4d)
 
 (Provenance is honest by the project's own rule: these amendments were authored
 by Claude at Pegah's direction. `updatedBy` never converts automated authorship

@@ -1,6 +1,13 @@
 # UXistentialism Studio — Ingestion Contract
 
-Version: 1.1.1 · 2026-07-12
+Version: 1.1.2 · 2026-07-12
+
+**v1.1.2 corrections (implementation audit):** endpoint-specific `source`
+binding (§2a/§2b); fixed automated provenance on the Editorial Board endpoint
+(§2b); duplicate rule corrected — a reused revision with a different
+substantive hash is a duplicate regardless of `projectedAt` equality (§6);
+canonical timestamp round-trip semantics (§1); real-Upstash cjson precision
+deployment gate (§6); footer fix.
 
 **v1.1.1 addendum (coordinator rulings on worker replanning questions):** live
 Editorial Board submissions must not claim `manuscript.status: "complete"`
@@ -69,10 +76,14 @@ session or other upstream producer ever chooses a transport revision or hash.
 
 `sourceUpdatedAt`, `projectedAt`, and every ISO timestamp inside `data` MUST use
 the exact `Date.toISOString()` format — `YYYY-MM-DDTHH:mm:ss.sssZ`, validated by
-`/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/`. Any other ISO 8601 variant is
-rejected with 400 `invalid_schema`. Before any ordering comparison (§6), the
-server converts timestamps to epoch milliseconds and compares numerically —
-never by string comparison.
+`/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/` **and by round-trip
+equality**: `new Date(Date.parse(t)).toISOString() === t`. The regex alone
+admits impossible calendar dates (e.g. February 31), which `Date.parse`
+silently normalizes into March; round-trip equality rejects them. Any failure
+of either check → 400 `invalid_schema`. The companion applies the same
+validation before submitting. Before any ordering comparison (§6), the server
+converts timestamps to epoch milliseconds and compares numerically — never by
+string comparison.
 
 ### Allowed `source` values
 
@@ -169,6 +180,8 @@ The `data` field must contain exactly:
   lives only in the transport envelope. (The committed fallback fixture
   `data/projections/obsidian.json` may carry a legacy `source` key; readers
   tolerate unknown fixture fields per §12, but it is never submitted.)
+- **Source binding (v1.1.2):** the envelope `source` on this endpoint must be
+  exactly `"companion"`; any other enum value → 400 `invalid_schema`.
 
 Redis keys written: `obsidian-projection`, `obsidian-projection-meta`, `obsidian-projection-prev`.
 
@@ -230,6 +243,21 @@ established by the **write path**, not asserted by payload content.
 - The committed fallback fixture's rulings are human-curated legacy data and
   may remain; the UI must present live board content as advice and may present
   rulings as human decisions only from that human-curated source.
+
+**Provenance binding (v1.1.2).** This endpoint is the automated path, and its
+provenance is fixed rather than trusted:
+
+- envelope `source` must be exactly `"editorial-board-inbox"` → else 400;
+- `data.updatedBy` must be `"claude"` → else 400 (a payload asserting
+  `"human"` through the automated path would be exactly the asserted-
+  attestation the rulings rule forbids);
+- `data.sourceLabel` must be exactly `"Claude Editorial Board · automated"`
+  → else 400 (display metadata must not be usable as evidence of human
+  authorship).
+
+`"studio-ui"` remains reserved for the WS-4 endpoints. A future
+human-authorized endpoint defines its own provenance under a versioned change.
+The committed fixture (e.g. `sourceLabel: "… · curated"`) keeps §12 tolerance.
 
 **Status rule (v1).** For the same reason, every live submission with
 `manuscript.status: "complete"` is rejected with 400 `invalid_schema`,
@@ -495,12 +523,26 @@ Timestamps are validated against the exact format in §1 and converted to
 **epoch milliseconds** before being passed into the script; all ordering
 comparisons are numeric. The hash used is the server's recomputed hash (§1b).
 
-| Condition (evaluated atomically) | Result | HTTP response |
+| Condition (evaluated atomically, in this order) | Result | HTTP response |
 |---|---|---|
 | Recomputed **substantive** hash (§1b) matches stored hash | No data write. **Heartbeat refresh only** (`lastSuccessfulSync` ← server time). | 200 `{ ok: true, status: "idempotent" }` |
 | Incoming `projectedAt` < stored `projectedAt` | No write. | 409 `{ error: "stale_payload", ... }` |
-| Incoming `revision` ≤ stored `revision` AND `projectedAt` ≠ stored | No write. | 409 `{ error: "duplicate", ... }` |
+| Incoming `revision` ≤ stored `revision` | No write. | 409 `{ error: "duplicate", ... }` |
 | All checks pass | Backup + write data and meta together (`lastSuccessfulSync` ← server time). | 200 `{ ok: true, status: "accepted" }` |
+
+**v1.1.2 correction:** the duplicate condition previously carried a
+`projectedAt ≠ stored` qualifier, which let a **changed** payload with the same
+revision and the same `projectedAt` silently overwrite the stored value. The
+qualifier is removed: any reused revision with a different substantive hash is
+a duplicate, regardless of `projectedAt` equality. Same-payload retries are
+unaffected — identical hashes return `idempotent` before the duplicate check
+is reached.
+
+**Deployment gate (real Upstash):** before production use, an integration test
+against a real Upstash database must assert that the Lua script's cjson number
+handling round-trips epoch-millisecond values exactly (13-digit values are
+within cjson's 14-significant-digit precision; this must be verified, not
+assumed).
 
 **Freshness rule.** `lastSuccessfulSync` means *the most recent successful
 synchronization — accepted or idempotent*. A fully authenticated, schema-valid,
@@ -692,4 +734,4 @@ the companion generated and fix the root cause before re-enabling sync.
 
 ---
 
-*End of Ingestion Contract v1.0.0*
+*End of Ingestion Contract v1.1.2*

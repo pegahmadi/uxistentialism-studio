@@ -1,7 +1,19 @@
 import Link from "next/link";
-import { getTodayBriefing, type Evidence } from "@/lib/today";
+import { getTodayBriefing, type Evidence, type SyncProvenance } from "@/lib/today";
+
+export const dynamic = "force-dynamic";
 
 const link = "cursor-pointer border-b border-line2 text-ink hover:border-muted";
+
+// Data-layer provenance (§8), in the same restrained mono language: live data
+// names its last sync; fixture/curated data says so plainly; stale never hides.
+function syncLabel(p: SyncProvenance): string {
+  if (p.source === "live") {
+    if (!p.lastSuccessfulSync) return "live · sync time unknown · stale";
+    return p.stale ? `live · stale · last synced ${p.lastSuccessfulSync}` : `live · synced ${p.lastSuccessfulSync}`;
+  }
+  return p.source === "fallback" ? "fixture" : "curated";
+}
 
 // Structured provenance, shown in the same restrained mono language as the page
 // eyebrows. Authored (Workspace) evidence reads a shade stronger than derived
@@ -23,8 +35,8 @@ function Provenance({ evidence }: { evidence: Evidence[] }) {
   );
 }
 
-export default function TodayPage() {
-  const b = getTodayBriefing();
+export default async function TodayPage() {
+  const b = await getTodayBriefing();
 
   const workspaceLive = b.sources.workspace === "file";
   const parts: string[] = [];
@@ -124,6 +136,13 @@ export default function TodayPage() {
           style={{ animation: "rise .7s ease .58s backwards" }}
         >
           {sourceLine}
+        </p>
+        {/* data-layer provenance — live / fixture / stale, never silent (§8) */}
+        <p
+          className="-mt-5 font-mono text-[10.5px] tracking-[0.04em] text-faint"
+          style={{ animation: "rise .7s ease .62s backwards" }}
+        >
+          projection · {syncLabel(b.provenance.projection)} — board · {syncLabel(b.provenance.board)}
         </p>
         <p className="text-[15px] text-faint" style={{ animation: "rise .7s ease .66s backwards" }}>
           — ◆

@@ -1,48 +1,41 @@
 // TEMPORARY — REMOVE AFTER GATE-5 SECRET DIAGNOSIS (reverted with the route).
 //
 // Proves the relation-only diagnostic: correct categories via the production
-// comparison primitive, generic 404 concealment, static misconfiguration body,
-// and that neither secret nor any substring/hash/length ever appears in
-// responses or captured logs.
+// comparison primitive; REAL-body rejection (streams without Content-Length,
+// and misleading Content-Length: 0); identical generic empty 404 for every
+// non-POST method; and that neither secret, meaningful substring, hash, nor
+// numeric length appears in any response or captured application log.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { relationOf } from "../../lib/diag-secret-relation.mjs";
-import { POST, GET } from "../../app/api/diag-secret-relation/route.ts";
+import * as route from "../../app/api/diag-secret-relation/route.ts";
 
 const S = "synthetic-server-secret-0123456789abcdef"; // synthetic fixtures only
 const hdr = (t) => `Bearer ${t}`;
+const URL_ = "https://example.test/api/diag-secret-relation";
 
-// ---- category logic (relationOf) ----
+// ---- category logic (relationOf) — all four categories, parameterized ----
 
-test("exact", () => assert.equal(relationOf(hdr(S), S), "exact"));
-test("server trailing newline → server_trim_matches_local", () =>
-  assert.equal(relationOf(hdr(S), S + "\n"), "server_trim_matches_local"));
-test("server surrounding spaces → server_trim_matches_local", () =>
-  assert.equal(relationOf(hdr(S), ` ${S} `), "server_trim_matches_local"));
-test("local trailing whitespace → local_trim_matches_server", () =>
-  assert.equal(relationOf(hdr(S + "  "), S), "local_trim_matches_server"));
-test("both sides differing whitespace → both_trim_match", () =>
-  assert.equal(relationOf(hdr(S + "\t"), ` ${S}`), "both_trim_match"));
-test("different values → none", () =>
-  assert.equal(relationOf(hdr("completely-different-value-xxxxxxxxxxxxx"), S), "none"));
-test("same length different value → none", () =>
-  assert.equal(relationOf(hdr(S.replace(/^s/, "z")), S), "none"));
-test("missing header → none", () => assert.equal(relationOf(null, S), "none"));
-test("malformed header → none", () => assert.equal(relationOf("Token abc", S), "none"));
-test("absent server secret → unconfigured", () => {
+for (const [name, header, server, expected] of [
+  ["exact", hdr(S), S, "exact"],
+  ["server trailing newline", hdr(S), S + "\n", "server_trim_matches_local"],
+  ["server surrounding spaces", hdr(S), ` ${S} `, "server_trim_matches_local"],
+  ["local trailing whitespace", hdr(S + "  "), S, "local_trim_matches_server"],
+  ["both differing whitespace", hdr(S + "\t"), ` ${S}`, "both_trim_match"],
+  ["different values", hdr("completely-different-value-xxxxxxxxxxxxx"), S, "none"],
+  ["same length different value", hdr(S.replace(/^s/, "z")), S, "none"],
+  ["missing header", null, S, "none"],
+  ["malformed header", "Token abc", S, "none"],
+]) {
+  test(`relationOf: ${name} → ${expected}`, () => assert.equal(relationOf(header, server), expected));
+}
+test("relationOf: absent server secret → unconfigured", () => {
   assert.equal(relationOf(hdr(S), undefined), "unconfigured");
   assert.equal(relationOf(hdr(S), ""), "unconfigured");
 });
 
-// ---- route behavior + purity ----
-
-function req({ auth, body, method = "POST" } = {}) {
-  const headers = new Headers();
-  if (auth) headers.set("authorization", auth);
-  if (body) headers.set("content-length", String(body.length));
-  return new Request("https://example.test/api/diag-secret-relation", { method, headers });
-}
+// ---- shared harness ----
 
 function withEnv(value, fn) {
   const prev = process.env.STUDIO_SYNC_SECRET;
@@ -57,76 +50,144 @@ function withEnv(value, fn) {
 function captureConsole() {
   const lines = [];
   const orig = {};
-  for (const m of ["log", "info", "warn", "error"]) {
+  for (const m of ["log", "info", "warn", "error", "debug"]) {
     orig[m] = console[m];
-    console[m] = (...a) => lines.push(a.join(" "));
+    console[m] = (...a) => lines.push(a.map(String).join(" "));
   }
   return { lines, restore: () => Object.assign(console, orig) };
 }
 
-test("route: exact relation returns static category, nothing logged, no secret material", async () => {
+// Purity: no secret, no meaningful substring, no hash-like hex run, no numeric
+// length (secret is 40 bytes; also check 64, the production length).
+function assertPure(text, logs) {
+  const all = text + "\n" + logs.join("\n");
+  assert.ok(!all.includes(S), "secret leaked");
+  assert.ok(!all.includes(S.slice(0, 12)), "secret prefix leaked");
+  assert.ok(!all.includes(S.slice(-12)), "secret suffix leaked");
+  assert.ok(!/[0-9a-f]{16,}/i.test(all), "hash-like hex leaked");
+  assert.ok(!/\b(40|64|65)\b/.test(all), "length-like number leaked");
+}
+
+async function callPOST(request, env = S) {
   const cap = captureConsole();
   try {
-    await withEnv(S, async () => {
-      const res = await POST(req({ auth: hdr(S) }));
-      const text = await res.text();
-      assert.equal(res.status, 200);
-      assert.equal(text, '{"relation":"exact"}');
-      assert.equal(res.headers.get("cache-control"), "no-store");
-      assert.ok(!text.includes(S) && !text.includes(S.slice(0, 12)) && !/\b\d{2,}\b/.test(text),
-        "no secret substrings/lengths in response");
-      assert.equal(cap.lines.length, 0, "route logs nothing");
-      assert.ok(!cap.lines.join(" ").includes(S));
-    });
+    let res;
+    await withEnv(env, async () => { res = await route.POST(request); });
+    const text = await res.text();
+    assertPure(text, cap.lines);
+    assert.equal(cap.lines.length, 0, "route must log nothing");
+    return { res, text };
   } finally { cap.restore(); }
-});
+}
 
-test("route: whitespace categories surface correctly", async () => {
-  await withEnv(S + "\n", async () => {
-    const res = await POST(req({ auth: hdr(S) }));
-    assert.equal(await res.text(), '{"relation":"server_trim_matches_local"}');
+const authOnly = (token) =>
+  new Request(URL_, { method: "POST", headers: { authorization: hdr(token) } });
+
+// ---- route: parameterized transport-reachable categories ----
+// (local_trim / both_trim are unreachable at the route level: the Headers
+// layer normalizes whitespace tails off header values before the wire — a
+// diagnosis-relevant fact proven below; both categories stay covered at the
+// relationOf layer above.)
+
+for (const [name, env, expected] of [
+  ["exact", S, '{"relation":"exact"}'],
+  ["server_trim_matches_local (newline)", S + "\n", '{"relation":"server_trim_matches_local"}'],
+  ["server_trim_matches_local (spaces)", ` ${S} `, '{"relation":"server_trim_matches_local"}'],
+]) {
+  test(`route: ${name} → exact static category`, async () => {
+    const { res, text } = await callPOST(authOnly(S), env);
+    assert.equal(res.status, 200);
+    assert.equal(text, expected);
+    assert.equal(res.headers.get("cache-control"), "no-store");
   });
-  // NOTE: at the ROUTE level a local whitespace tail is unreachable — the
-  // fetch Headers layer normalizes leading/trailing HTTP whitespace off header
-  // values before the server ever sees them (so the wire presents the trimmed
-  // token and the relation reads "exact"). This is a diagnosis-relevant fact:
-  // local-side whitespace cannot cause the production 401. The
-  // local_trim_matches_server category remains covered at the logic layer
-  // (relationOf unit test above) for non-transport callers.
-  await withEnv(S, async () => {
-    const res = await POST(req({ auth: hdr(S + " ") }));
-    assert.equal(await res.text(), '{"relation":"exact"}');
-  });
+}
+
+test("route: transport normalizes a local whitespace tail (reads as exact)", async () => {
+  const { res, text } = await callPOST(authOnly(S + " "), S);
+  assert.equal(res.status, 200);
+  assert.equal(text, '{"relation":"exact"}');
 });
 
 test("route: different values → generic empty 404", async () => {
-  await withEnv(S, async () => {
-    const res = await POST(req({ auth: hdr("another-value-entirely-9876543210zzzzzz") }));
-    assert.equal(res.status, 404);
-    assert.equal(await res.text(), "");
-  });
+  const { res, text } = await callPOST(authOnly("another-value-entirely-9876543210zzzzzz"), S);
+  assert.equal(res.status, 404);
+  assert.equal(text, "");
+  assert.equal(res.headers.get("cache-control"), "no-store");
 });
 
-test("route: request body present → generic 404 (no body accepted)", async () => {
-  await withEnv(S, async () => {
-    const res = await POST(req({ auth: hdr(S), body: "{}" }));
-    assert.equal(res.status, 404);
-    assert.equal(await res.text(), "");
+// ---- route: REAL body rejection ----
+
+test("route: streamed body WITHOUT Content-Length → generic empty 404 before comparison", async () => {
+  const stream = new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode("{}")); c.close(); } });
+  const request = new Request(URL_, {
+    method: "POST",
+    headers: { authorization: hdr(S) },
+    body: stream,
+    duplex: "half",
   });
+  assert.equal(request.headers.get("content-length"), null, "precondition: no declared length");
+  assert.notEqual(request.body, null, "precondition: body stream attached");
+  const { res, text } = await callPOST(request, S);
+  assert.equal(res.status, 404);
+  assert.equal(text, "");
 });
 
-test("route: GET → generic 404", async () => {
-  await withEnv(S, async () => {
-    const res = await GET();
-    assert.equal(res.status, 404);
-    assert.equal(await res.text(), "");
-  });
+test("route: misleading Content-Length: 0 WITH an actual body → generic empty 404", async () => {
+  const stream = new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode("{}")); c.close(); } });
+  let request;
+  try {
+    request = new Request(URL_, {
+      method: "POST",
+      headers: { authorization: hdr(S), "content-length": "0" },
+      body: stream,
+      duplex: "half",
+    });
+  } catch {
+    return; // runtime refuses to construct it — the bypass cannot exist here
+  }
+  assert.notEqual(request.body, null, "precondition: body stream attached");
+  const { res, text } = await callPOST(request, S);
+  assert.equal(res.status, 404);
+  assert.equal(text, "");
 });
 
-test("route: server secret absent → static production misconfiguration body", async () => {
-  await withEnv(undefined, async () => {
-    const res = await POST(req({ auth: hdr(S) }));
+test("route: declared non-zero Content-Length → generic empty 404 (defense in depth)", async () => {
+  const request = new Request(URL_, {
+    method: "POST",
+    headers: { authorization: hdr(S), "content-length": "2" },
+  });
+  const { res, text } = await callPOST(request, S);
+  assert.equal(res.status, 404);
+  assert.equal(text, "");
+});
+
+// ---- route: every non-POST method → identical generic empty 404 ----
+
+for (const method of ["GET", "HEAD", "PUT", "PATCH", "DELETE", "OPTIONS"]) {
+  test(`route: ${method} → identical generic empty 404 + no-store`, async () => {
+    const cap = captureConsole();
+    try {
+      const res = await route[method]();
+      const text = await res.text();
+      assert.equal(res.status, 404);
+      assert.equal(text, "");
+      assert.equal(res.headers.get("cache-control"), "no-store");
+      assertPure(text, cap.lines);
+      assert.equal(cap.lines.length, 0);
+    } finally { cap.restore(); }
+  });
+}
+
+// ---- route: absent server secret → static production misconfiguration body ----
+
+test("route: server secret absent → static server_error body, nothing logged", async () => {
+  const cap = captureConsole();
+  try {
+    let res;
+    await withEnv(undefined, async () => { res = await route.POST(authOnly(S)); });
+    const text = await res.text();
     assert.equal(res.status, 500);
-    assert.equal(await res.text(), '{"ok":false,"error":"server_error","message":"Server configuration error."}');
-  });
+    assert.equal(text, '{"ok":false,"error":"server_error","message":"Server configuration error."}');
+    assert.ok(!text.includes(S) && cap.lines.length === 0);
+  } finally { cap.restore(); }
 });

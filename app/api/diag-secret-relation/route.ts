@@ -21,9 +21,12 @@ const HEADERS = { "Content-Type": "application/json", "Cache-Control": "no-store
 const generic404 = () => new Response(null, { status: 404, headers: { "Cache-Control": "no-store" } });
 
 export async function POST(request: Request): Promise<Response> {
-  // Accept no request body.
+  // Accept no request body: reject the ACTUAL body stream (a request may
+  // carry a body without any Content-Length), keeping the declared-length
+  // check as defense in depth.
   const declared = request.headers.get("content-length");
   if (declared && declared !== "0") return generic404();
+  if (request.body !== null) return generic404();
 
   const relation = relationOf(request.headers.get("authorization"), process.env.STUDIO_SYNC_SECRET);
 
@@ -38,6 +41,12 @@ export async function POST(request: Request): Promise<Response> {
   return new Response(JSON.stringify({ relation }), { status: 200, headers: HEADERS });
 }
 
-export async function GET(): Promise<Response> {
-  return generic404();
-}
+// Every non-POST method answers the identical generic empty 404, so no
+// framework-generated 405/Allow response can reveal that the route exists.
+const conceal = async (): Promise<Response> => generic404();
+export const GET = conceal;
+export const HEAD = conceal;
+export const PUT = conceal;
+export const PATCH = conceal;
+export const DELETE = conceal;
+export const OPTIONS = conceal;

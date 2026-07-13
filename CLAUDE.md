@@ -71,6 +71,17 @@ URL and deploy branch (never create a second project), push the reviewed local
 `main`, connect Upstash through that project, set `STUDIO_SYNC_SECRET`, and
 verify the deployed commit is the intended WS-1 merge.
 
+Redis binding note (2026-07-12): the Upstash resource
+`uxistentialism-studio-redis` is connected via the Vercel Marketplace with a
+Custom Prefix of `UPSTASH_REDIS_REST`, yielding
+`UPSTASH_REDIS_REST_KV_REST_API_URL/_TOKEN` (the prefix is PREPENDED to the
+Marketplace's native `KV_REST_API_*` names — it does not rename them). The app
+accepts exactly two pair-atomic env schemes, canonical
+`UPSTASH_REDIS_REST_URL/_TOKEN` first, the deployed pair second (contract §8
+v1.1.3). Never set a Custom Prefix when (re)connecting the binding, and never
+consume TCP/read-only variables. **This project auto-deploys every push to
+`main`** — pushing is deploying; sequence accordingly.
+
 ---
 
 ## What automated workers may do
@@ -233,7 +244,8 @@ Redis key ownership: see `docs/INGESTION_CONTRACT.md`.
 ## Last updated
 
 2026-07-12 · updatedBy: claude (coordinator amendments after independent audit)
-reviewedBy: human · 2026-07-12 (contract v1.1.2 through e538c4d)
+reviewedBy: human — pending review (v1.1.3 deployment-binding amendment under
+review; v1.1.2 through e538c4d approved 2026-07-12)
 
 (Provenance is honest by the project's own rule: these amendments were authored
 by Claude at Pegah's direction. `updatedBy` never converts automated authorship

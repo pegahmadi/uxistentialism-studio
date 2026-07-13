@@ -70,14 +70,14 @@ Do not modify:
 
 ```json
 {
-  "vaultPath": "/Users/pegahahmadi/Desktop/Obsidian-UXistentialism",
+  "vaultPath": "/Users/you/Desktop/Obsidian-UXistentialism",
   "studioUrl": "https://[STUDIO_URL]",
   "syncSecret": "<STUDIO_SYNC_SECRET value>",
   "watchGlob": "UXistentialism/**/*.md",
   "debounceMs": 3000,
   "reconcileIntervalMs": 21600000,
-  "inboxPath": "/Users/pegahahmadi/.studio-inbox",
-  "logPath": "/Users/pegahahmadi/Library/Logs/studio-companion.log"
+  "inboxPath": "/Users/you/.studio-inbox",
+  "logPath": "/Users/you/Library/Logs/studio-companion.log"
 }
 ```
 

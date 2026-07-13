@@ -12,6 +12,7 @@ import {
   ensureInboxDirs,
   waitForStableSize,
   createInboxWatcher,
+  artifactLabel,
 } from "../inbox-watcher.mjs";
 import { createLogger } from "../logger.mjs";
 import { check, summary, validArtifact, artifactName } from "./_helpers.mjs";
@@ -179,6 +180,25 @@ console.log("409 conflict → recovery pass resubmits with recovered revision:")
   watcher.close();
 }
 
+console.log("Impossible-date artifact → rejected/ (FIX 9):");
+{
+  const dir = path.join(base, "drain-baddate");
+  await ensureInboxDirs(dir);
+  const impossible = validArtifact();
+  impossible.sourceUpdatedAt = "2026-02-31T18:04:07.123Z"; // matches the regex, not a real instant
+  await writeFile(path.join(dir, artifactName("2026-07-12T09:00:00.000Z", "u1")), JSON.stringify(impossible));
+
+  const { validateInboxArtifact } = await import("../validator.mjs");
+  const { watcher } = makeWatcher(dir, (artifact) =>
+    validateInboxArtifact(artifact).length > 0
+      ? { outcome: "validation-error" }
+      : { outcome: "success", status: "accepted" },
+  );
+  await watcher._drainPass();
+  check("impossible-date artifact rejected, not submitted", (await listInbox(dir)).length === 0);
+  check("impossible-date artifact preserved in rejected/", (await listRejected(dir)).length === 1, await listRejected(dir));
+}
+
 console.log("Secret absence: inbox logs never contain the secret");
 {
   // exercised implicitly: all loggers above redact; simple sanity line
@@ -187,6 +207,57 @@ console.log("Secret absence: inbox logs never contain the secret");
   const { watcher, lines } = makeWatcher(dir, () => ({ outcome: "success", status: "accepted" }));
   await watcher._drainPass();
   check("no secret in inbox logs", lines.every((l) => !l.includes(SECRET)));
+}
+
+console.log("Filename redaction (FIX 12): raw inbox filenames never logged");
+{
+  const dir = path.join(base, "drain-redact");
+  await ensureInboxDirs(dir);
+  // A legacy drop with a sensitive name, invalid JSON → moveToRejected path.
+  const sensitive = "reorg-plan-project-nightshade.json";
+  await writeFile(path.join(dir, sensitive), "{ not json");
+  // A valid artifact with a sensitive legacy name → success/removal path.
+  const sensitive2 = "acquisition-target-shortlist.json";
+  await writeFile(path.join(dir, sensitive2), JSON.stringify(validArtifact()));
+
+  const { watcher, lines } = makeWatcher(dir, () => ({ outcome: "success", status: "accepted" }));
+  await watcher._drainPass();
+
+  check("logs were produced for both files", lines.filter((l) => l.includes("artifact#")).length >= 2, lines);
+  check(
+    "sensitive filenames never appear in logs",
+    lines.every((l) => !l.includes("nightshade") && !l.includes("acquisition") && !l.includes(sensitive) && !l.includes(sensitive2)),
+    lines.filter((l) => l.includes("nightshade") || l.includes("acquisition")),
+  );
+  check("opaque labels are stable 8-hex identifiers", lines.some((l) => /artifact#[0-9a-f]{8}\b/.test(l)), lines);
+  check(
+    "label matches the documented sha256 mapping",
+    lines.some((l) => l.includes(artifactLabel(sensitive))),
+    artifactLabel(sensitive),
+  );
+  // on-disk names are untouched (operator lookup via ls + the README recipe)
+  check("rejected/ keeps the original filename on disk", (await listRejected(dir)).some((n) => n.endsWith(sensitive)));
+}
+
+console.log("fs error logging (FIX 12): code only, never a message with the filename");
+{
+  const { chmod: chmodDir } = await import("node:fs/promises");
+  const dir = path.join(base, "drain-fserr");
+  await ensureInboxDirs(dir);
+  const sensitiveName = "confidential-board-memo.json";
+  await writeFile(path.join(dir, sensitiveName), JSON.stringify(validArtifact()));
+
+  const { watcher, lines } = makeWatcher(dir, () => ({ outcome: "success", status: "accepted" }));
+  // Read-only inbox dir: submit succeeds, then unlink fails with a REAL fs
+  // error whose message embeds the sensitive filename.
+  await chmodDir(dir, 0o500);
+  try {
+    await watcher._drainPass();
+  } finally {
+    await chmodDir(dir, 0o700);
+  }
+  check("fs error code surfaced", lines.some((l) => l.includes("could not remove") && l.includes("EACCES")), lines);
+  check("fs error message (with the filename) never survives", lines.every((l) => !l.includes("confidential") && !l.includes(sensitiveName)), lines.filter((l) => l.includes("confidential")));
 }
 
 await rm(base, { recursive: true, force: true });

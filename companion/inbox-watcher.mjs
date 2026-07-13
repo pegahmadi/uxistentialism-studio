@@ -23,12 +23,26 @@
  *     recovered revision (storedRevision + 1) and a fresh envelope.
  *   - Inbox and rejected/ are created/verified mode 700.
  *   - There is NO direct-POST fallback: offline artifacts simply wait.
+ *   - PRIVACY (FIX 12): raw inbox filenames are NEVER logged — legacy drops
+ *     can carry sensitive names. Log lines identify an artifact by an opaque
+ *     label, `artifact#<8-hex>` (first 8 hex chars of the SHA-256 of the
+ *     filename). Operators map a label back to a file with:
+ *       for f in ~/.studio-inbox/*.json; do
+ *         printf '%s  %s\n' "$(basename "$f" | tr -d '\n' | shasum -a 256 | cut -c1-8)" "$f"
+ *       done
+ *     Filesystem errors log err.code only, never raw messages.
  */
 
 import { readdir, readFile, rename, unlink, stat, mkdir, chmod } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import chokidar from "chokidar";
 import { createDebouncedSingleFlight } from "./vault-watcher.mjs";
+
+/** FIX 12 — opaque log identifier for an inbox filename (never the name itself). */
+export function artifactLabel(name) {
+  return `artifact#${createHash("sha256").update(name).digest("hex").slice(0, 8)}`;
+}
 
 const NAME_RE = /^editorial-board-(\d{4})-(\d{2})-(\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z-(.+)\.json$/;
 
@@ -105,9 +119,9 @@ export function createInboxWatcher({ inboxPath, submit, logger, stability = {}, 
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");
     try {
       await rename(path.join(inboxPath, name), path.join(rejectedDir, `${stamp}-${name}`));
-      logger.warn(`inbox artifact ${name} moved to rejected/ — ${reason}`);
+      logger.warn(`inbox ${artifactLabel(name)} moved to rejected/ — ${reason}`);
     } catch (e) {
-      logger.error(`could not move inbox artifact ${name} to rejected/: ${e?.code ?? "error"}`);
+      logger.error(`could not move inbox ${artifactLabel(name)} to rejected/: ${e?.code ?? "error"}`);
     }
   }
 
@@ -142,9 +156,9 @@ export function createInboxWatcher({ inboxPath, submit, logger, stability = {}, 
         try {
           await unlink(filePath);
         } catch (e) {
-          logger.error(`submitted inbox artifact ${name} but could not remove it: ${e?.code ?? "error"}`);
+          logger.error(`submitted inbox ${artifactLabel(name)} but could not remove it: ${e?.code ?? "error"}`);
         }
-        logger.info(`inbox artifact ${name} submitted (${result.status}) and removed`);
+        logger.info(`inbox ${artifactLabel(name)} submitted (${result.status}) and removed`);
         return "success";
       case "validation-error":
         await moveToRejected(name, "failed §2b validation (see log lines above)");
@@ -153,7 +167,7 @@ export function createInboxWatcher({ inboxPath, submit, logger, stability = {}, 
         await moveToRejected(name, `server rejected it (HTTP ${result.httpStatus}) — contract drift; preserved in rejected/`);
         return "rejected";
       case "conflict":
-        logger.warn(`inbox artifact ${name} hit a revision conflict — will resubmit with the recovered revision`);
+        logger.warn(`inbox ${artifactLabel(name)} hit a revision conflict — will resubmit with the recovered revision`);
         return "conflict";
       default:
         return "unavailable";
@@ -221,7 +235,8 @@ export function createInboxWatcher({ inboxPath, submit, logger, stability = {}, 
         depth: 0,
       });
       watcher.on("add", () => runner.trigger());
-      watcher.on("error", (e) => logger.error(`inbox watcher error: ${e?.message ?? "unknown"}`));
+      // err.code only — watcher error messages can embed filenames (FIX 12).
+      watcher.on("error", (e) => logger.error(`inbox watcher error: ${e?.code ?? "unknown"}`));
       logger.info("inbox watcher ready");
     },
     drainNow: () => runner.runNow(),

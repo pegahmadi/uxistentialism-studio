@@ -118,6 +118,31 @@ console.log("Network errors:");
   check("connection refused → unavailable after retries", r.outcome === "unavailable", r);
 }
 
+console.log("Request timeout (FIX 10): a never-responding server cannot hang a sync");
+{
+  // The server ACCEPTS every request and never responds. Without the
+  // per-attempt AbortController timeout this test would never finish.
+  const server = await startMockServer(() => "hang");
+  const { ingestor, lines } = makeIngestor(server.url, { requestTimeoutMs: 80 });
+  const started = Date.now();
+  const r = await ingestor.submit("/api/ingest/obsidian", envelope);
+  const elapsed = Date.now() - started;
+  check("hung endpoint → unavailable after bounded retries", r.outcome === "unavailable", r);
+  check("initial attempt + 3 retries = 4 requests", server.requests.length === 4, server.requests.length);
+  check("bounded: ~4 × timeout, not forever", elapsed < 4000, elapsed);
+  check("timeout logged as a retryable network category", lines.some((l) => l.includes("timeout after 80ms")), lines);
+  check("stops loudly after retries", lines.some((l) => l.includes("unavailable after 3 retries")));
+  await server.close();
+}
+{
+  // Recovery: first two attempts hang, the third answers 200.
+  const server = await startMockServer((_, n) => (n < 3 ? "hang" : { status: 200, body: { ok: true, status: "accepted" } }));
+  const { ingestor } = makeIngestor(server.url, { requestTimeoutMs: 80 });
+  const r = await ingestor.submit("/api/ingest/obsidian", envelope);
+  check("recovers when a later attempt responds in time", r.outcome === "success" && server.requests.length === 3, { r, requests: server.requests.length });
+  await server.close();
+}
+
 console.log("Secret absence (all flows above):");
 check("secret never appears in any log line", allLines.every((l) => !l.includes(SECRET)));
 check("logs were actually produced", allLines.length > 0, allLines.length);

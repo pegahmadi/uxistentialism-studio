@@ -7,13 +7,21 @@
  *                                    NON-retryable; caller recovers the sequence.
  *   other 4xx                      → { outcome: "contract-drift" } — no retry,
  *                                    surfaced as an error (never silent).
- *   5xx / network error            → up to 3 retries with 5s backoff, then
+ *   5xx / network error / timeout  → up to 3 retries with 5s backoff, then
  *                                    { outcome: "unavailable" } until next trigger.
+ *
+ * Every attempt is bounded by an AbortController timeout (FIX 10,
+ * requestTimeoutMs, default 30000 ms) covering both the request and the
+ * response-body read, so a server that accepts the connection but never
+ * responds cannot hang a sync forever. A timeout classifies as a retryable
+ * network failure (same 3-retry/backoff/stop policy).
  *
  * The secret travels ONLY in the one Authorization header. It is never logged
  * (the logger additionally redacts it defense-in-depth). Server response
  * `message` bodies are never logged — only the short error category.
  */
+
+export const DEFAULT_REQUEST_TIMEOUT_MS = 30000;
 
 export function createIngestor({
   studioUrl,
@@ -22,28 +30,37 @@ export function createIngestor({
   fetchImpl = fetch,
   maxRetries = 3,
   retryDelayMs = 5000,
+  requestTimeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
   sleep,
 }) {
   const wait = sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
   const base = studioUrl.replace(/\/+$/, "");
 
   async function attemptOnce(url, body) {
-    const res = await fetchImpl(url, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${syncSecret}`,
-      },
-      body,
-    });
-    const text = await res.text();
-    let parsed = null;
+    // FIX 10 — per-attempt timeout; the timer spans the fetch AND the body read.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
     try {
-      parsed = JSON.parse(text);
-    } catch {
-      /* non-JSON body — classified by HTTP status alone */
+      const res = await fetchImpl(url, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${syncSecret}`,
+        },
+        body,
+        signal: controller.signal,
+      });
+      const text = await res.text();
+      let parsed = null;
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        /* non-JSON body — classified by HTTP status alone */
+      }
+      return { status: res.status, body: parsed };
+    } finally {
+      clearTimeout(timer);
     }
-    return { status: res.status, body: parsed };
   }
 
   /**
@@ -64,7 +81,13 @@ export function createIngestor({
       try {
         res = await attemptOnce(url, body);
       } catch (e) {
-        logger.warn(`network error posting to ${endpointPath}: ${e?.cause?.code ?? e?.code ?? e?.message ?? "unknown"}`);
+        // Timeout aborts surface as AbortError/TimeoutError — retryable, like
+        // any network failure. Codes/categories only, never raw messages.
+        const category =
+          e?.name === "AbortError" || e?.name === "TimeoutError"
+            ? `timeout after ${requestTimeoutMs}ms`
+            : (e?.cause?.code ?? e?.code ?? e?.name ?? "unknown");
+        logger.warn(`network error posting to ${endpointPath}: ${category}`);
         continue; // network → retry
       }
 

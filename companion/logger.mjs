@@ -9,10 +9,25 @@
  *   - Errors render their message only (stacks embed absolute file paths).
  *   - Every emitted line passes through the redaction table; longer redaction
  *     values are applied first so a path prefix cannot shadow a longer secret.
+ *   - NOTE-PATH SCRUB (FIX 12): after table redaction, any surviving fragment
+ *     that ends in ".md" — including fragments with spaces hanging off a
+ *     redaction placeholder, e.g. "[vault]/Private Note.md" — is replaced
+ *     with "[note]". Note filenames are private; no ".md" name or path
+ *     fragment may reach a log line by any route.
  *
  * The sink is injectable so tests can capture output and assert
  * secret-absence across all flows.
  */
+
+/**
+ * FIX 12 — final defense-in-depth pass. Matches (a) a redaction placeholder
+ * or path fragment (which may contain spaces, as vault note names do)
+ * running up to ".md", or (b) a bare whitespace-free token ending in ".md".
+ * Deliberately aggressive: over-scrubbing a log line is acceptable; leaking
+ * a note filename is not.
+ */
+const NOTE_PATH_RE = /(?:\[vault\]|\[inbox\]|~)?(?:\/[^\n]*?)?[^\s/]*\.md\b/g;
+export const scrubNotePaths = (text) => text.replace(NOTE_PATH_RE, "[note]");
 
 /**
  * @param {object} [opts]
@@ -42,7 +57,7 @@ export function createLogger({ redactions = [], sink, name = "companion" } = {})
 
   const emit = (level, parts) => {
     const line = `${new Date().toISOString()} [${name}] ${level} ${parts.map(coerce).join(" ")}`;
-    write(redact(line));
+    write(scrubNotePaths(redact(line)));
   };
 
   return {

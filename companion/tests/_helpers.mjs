@@ -40,7 +40,9 @@ export function captureLogger(createLogger, redactions = []) {
 
 /**
  * Local mock ingestion server. `handler(record, n)` returns
- * { status, body } or the string "destroy" to sever the socket (network error).
+ * { status, body }, the string "destroy" to sever the socket (network error),
+ * or the string "hang" to accept the request and never respond (for
+ * request-timeout tests — FIX 10).
  */
 export async function startMockServer(handler) {
   const requests = [];
@@ -61,6 +63,9 @@ export async function startMockServer(handler) {
         req.socket.destroy();
         return;
       }
+      if (reply === "hang") {
+        return; // accepted, never answered — the client's timeout must fire
+      }
       res.writeHead(reply.status, { "content-type": "application/json" });
       res.end(JSON.stringify(reply.body ?? {}));
     });
@@ -71,7 +76,11 @@ export async function startMockServer(handler) {
     url: `http://127.0.0.1:${port}`,
     port,
     requests,
-    close: () => new Promise((resolve) => server.close(resolve)),
+    close: () =>
+      new Promise((resolve) => {
+        server.closeAllConnections?.(); // hung sockets must not block close
+        server.close(resolve);
+      }),
   };
 }
 

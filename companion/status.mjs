@@ -8,6 +8,12 @@
  *   - Writes are ATOMIC: serialize to a same-directory temp file (mode 600),
  *     then rename over status.json. A crash between the temp write and the
  *     rename leaves the previous state fully intact.
+ *   - Writes are SERIALIZED (FIX 7): the vault and inbox flows can persist
+ *     concurrently, and an out-of-order rename could leave disk older than
+ *     memory (losing one endpoint's revision on restart). All writes flow
+ *     through a promise queue; each write serializes the CURRENT in-memory
+ *     state, so disk always converges to the latest state. A failed write
+ *     rejects its caller but never poisons the queue.
  *   - Revision state survives restart: sequences are re-read from disk on
  *     construction.
  *   - 409 recovery: recordConflict(storedRevision) resets the sequence so the
@@ -62,7 +68,7 @@ export async function createStatusStore({ statusPath, logger, fsOps } = {}) {
 
   await mkdir(path.dirname(statusPath), { recursive: true, mode: 0o700 });
 
-  async function persist() {
+  async function persistNow() {
     const tmp = `${statusPath}.tmp-${process.pid}-${randomBytes(4).toString("hex")}`;
     await ops.writeFile(tmp, JSON.stringify(state, null, 2) + "\n", { mode: 0o600 });
     try {
@@ -75,6 +81,16 @@ export async function createStatusStore({ statusPath, logger, fsOps } = {}) {
       }
       throw e;
     }
+  }
+
+  // FIX 7 — promise-queue mutex: writes run strictly one after another, each
+  // snapshotting the in-memory state at execution time. The tail swallows
+  // rejections so one failed write never poisons subsequent writes.
+  let writeQueue = Promise.resolve();
+  function persist() {
+    const write = writeQueue.then(persistNow);
+    writeQueue = write.catch(() => {});
+    return write;
   }
 
   const assertEndpoint = (ep) => {

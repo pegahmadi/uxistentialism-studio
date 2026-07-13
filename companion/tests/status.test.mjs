@@ -66,6 +66,66 @@ check("no temp files left behind", leftovers.length === 0, leftovers);
 store = await createStatusStore({ statusPath });
 check("crashed write cannot roll the sequence forward", store.nextRevision("obsidianProjection") === 3);
 
+console.log("Serialized writes (FIX 7): reversed rename completion cannot lose a revision:");
+{
+  const { rename: realRename, writeFile: realWriteFile } = await import("node:fs/promises");
+  const serPath = path.join(dir, "serialized.json");
+  const sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  // The FIRST rename is delayed past the second: without serialization the
+  // second (newer) write lands first and the stale first rename then
+  // overwrites it, losing the other endpoint's revision on restart.
+  let renameCalls = 0;
+  const slow = await createStatusStore({
+    statusPath: serPath,
+    fsOps: {
+      rename: async (a, b) => {
+        renameCalls += 1;
+        if (renameCalls === 1) await sleepMs(120);
+        return realRename(a, b);
+      },
+    },
+  });
+  await Promise.all([
+    slow.recordSuccess("obsidianProjection", { revision: 7, payloadHash: "sha256-obs" }),
+    (async () => {
+      await sleepMs(10); // starts after the first write, finishes long before its rename would
+      await slow.recordSuccess("editorialBoard", { revision: 3, payloadHash: "sha256-brd" });
+    })(),
+  ]);
+  check("both renames ran", renameCalls === 2, renameCalls);
+
+  // Restart: BOTH endpoints' latest sequences must be on disk.
+  const reloaded = await createStatusStore({ statusPath: serPath });
+  check("obsidian revision survives concurrent write", reloaded.nextRevision("obsidianProjection") === 8, reloaded.get("obsidianProjection").lastRevision);
+  check("editorial-board revision survives concurrent write", reloaded.nextRevision("editorialBoard") === 4, reloaded.get("editorialBoard").lastRevision);
+
+  // A failed write must not poison the queue.
+  let failNext = true;
+  const flaky = await createStatusStore({
+    statusPath: serPath,
+    fsOps: {
+      writeFile: async (...args) => {
+        if (failNext) {
+          failNext = false;
+          throw Object.assign(new Error("ENOSPC (simulated)"), { code: "ENOSPC" });
+        }
+        return realWriteFile(...args);
+      },
+    },
+  });
+  let failed = false;
+  try {
+    await flaky.recordSuccess("obsidianProjection", { revision: 8, payloadHash: "sha256-x" });
+  } catch {
+    failed = true;
+  }
+  check("failed write rejects its caller", failed);
+  await flaky.recordSuccess("editorialBoard", { revision: 4, payloadHash: "sha256-y" });
+  const afterFlaky = await createStatusStore({ statusPath: serPath });
+  check("queue not poisoned: the next write persists", afterFlaky.get("editorialBoard").lastRevision === 4);
+}
+
 console.log("Corrupt status file:");
 const corruptPath = path.join(dir, "corrupt.json");
 await (await import("node:fs/promises")).writeFile(corruptPath, "{ not json");

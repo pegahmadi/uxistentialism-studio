@@ -63,7 +63,7 @@ A file with **exactly two top-level keys** — nothing else:
 ```typescript
 {
   manuscript: {
-    id:          string;   // slug-style: non-empty, no whitespace, no "/" or "\", no ".md"
+    id:          string;   // §2b requires only a string (see id convention note below)
     title:       string;
     reviewRound: number;
     status:      "in review" | "awaiting ruling";   // see Authority rules — NOT "complete"
@@ -90,6 +90,17 @@ A file with **exactly two top-level keys** — nothing else:
   not include it).
 - `reviewers` must contain at least one entry.
 - The middle dot in `sourceLabel` is **U+00B7** (`·`), not a hyphen.
+
+**`manuscript.id` convention (producer-side, NOT enforced here).** Contract §2b
+and the companion/server board validator require only that `id` is a `string` —
+empty, whitespace, and relative-slash values currently pass ingestion (unlike
+the *Obsidian* endpoint, which does enforce a slug rule on concept ids). As a
+**producer convention**, the Editorial Board skill SHOULD emit a slug-style id
+(non-empty, no whitespace, no `/`) matching the manuscript's Studio concept id,
+so the Studio can correlate the review with the right piece — but this is a
+recommendation, not a validation boundary. (Note: a `.md` fragment anywhere in
+`data`, including in an id, is separately rejected by the §5 public-safety scan
+as a path-like string.)
 
 ---
 
@@ -133,11 +144,25 @@ editorial-board-<timestamp>-<unique-suffix>.json
   (e.g. `2026-07-12T18-04-07-123Z`).
 - `<unique-suffix>` — a UUID or equivalently unique identifier. A millisecond
   timestamp alone can collide; the suffix guarantees uniqueness.
-- **Exclusive/atomic creation.** The producer must create the file
-  exclusively and never overwrite an existing path (e.g. write to a temp name
-  and atomically rename, or open with an exclusive-create flag). Overwriting an
-  existing artifact — or a partial write another reader can observe — is a
-  contract violation.
+
+**Publication semantics — two properties, both required, both a Phase-C gate.**
+Before this delivery mechanism is trusted, Phase C must **empirically
+demonstrate** that the Cowork Write tool can publish the artifact such that:
+
+1. **No overwrite** — creating the artifact never replaces an existing
+   destination path.
+2. **No partial visibility** — the companion's watcher only ever observes a
+   *fully written* artifact, never a partially-written file at its final path.
+
+An exclusive-create flag alone is **not sufficient**: it satisfies (1) but can
+still expose a partially-written final file to the watcher, failing (2). The
+concrete mechanism (for example, writing to a temporary path and atomically
+renaming into place) is **not prescribed here** — Phase C determines what the
+Cowork environment can actually guarantee. If neither property can be met with
+the tools available to the board session, **stop and return to the
+Coordinator** (see [Delivery mechanism](#delivery-mechanism)); do not weaken the
+requirement. (The companion's size-stability guard is defense-in-depth against
+partials, not a substitute for atomic publication.)
 
 The companion processes artifacts oldest-first by the parsed timestamp prefix,
 with the unique suffix as a deterministic tie-break (file mtime is the fallback

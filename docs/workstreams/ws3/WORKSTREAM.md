@@ -59,17 +59,22 @@ Editorial Board output enters the Studio through the private watched inbox folde
 inside the companion configuration only — it does not need to be distributed to
 every Claude or Cowork session that might run a board review.
 
-The chosen mechanism for the first implementation:
+The mechanism:
 
-At the end of a board review session, the Editorial Board skill writes a structured
-JSON file to `~/.studio-inbox/editorial-board-[ISO-timestamp].json` using the
-Write tool available in Cowork. The companion's inbox watcher (WS-2) detects the
-file, validates it, POSTs it to `/api/ingest/editorial-board`, and deletes it on
+At the end of a board review session, the Editorial Board skill writes a
+**data-only** JSON artifact to `~/.studio-inbox/` using the Write tool available
+in Cowork. Its name is collision-resistant —
+`editorial-board-<timestamp>-<unique-suffix>.json` — and it is created without
+overwriting any existing path and without exposing a partially-written file (see
+`docs/EDITORIAL_BOARD_OUTPUT.md`). The companion's inbox watcher (WS-2) detects
+the file, validates it against §2b, **builds the entire transport envelope**
+(assigning `revision` from its persistent per-endpoint sequence and computing
+`payloadHash`), POSTs it to `/api/ingest/editorial-board`, and deletes it on
 success. The Studio Iteration view shows updated board state on next navigation.
 
-Direct curl POST (from a bash tool call in the skill) remains a fallback option
-for cases where the companion is not running, but it requires the sync secret to
-be available in the shell environment and is therefore not the primary mechanism.
+**There is no direct-POST fallback.** The sync secret is never distributed to a
+board-review session. If the companion is offline, the artifact waits in the
+inbox and is drained when the companion next runs.
 
 ---
 
@@ -99,56 +104,34 @@ Before production integration, verify:
 
 ## Output contract for the Editorial Board skill
 
-Document this contract in `docs/EDITORIAL_BOARD_OUTPUT.md`.
-
-The skill's final step produces a JSON file matching exactly the Editorial Board
-payload defined in `docs/INGESTION_CONTRACT.md` §2b, wrapped in the standard
-envelope from §1:
+The canonical output contract is **`docs/EDITORIAL_BOARD_OUTPUT.md`**. In
+summary, the skill's final step writes a **data-only** artifact with exactly two
+top-level keys — it never constructs a transport envelope:
 
 ```json
 {
-  "schemaVersion": 1,
-  "source": "editorial-board-inbox",
-  "sourceUpdatedAt": "<ISO timestamp of the session>",
-  "projectedAt":    "<ISO timestamp when the skill writes the file>",
-  "revision":       1,
-  "payloadHash":    "sha256-...",
-  "data": {
-    "manuscript": {
-      "id":          "<manuscript slug>",
-      "title":       "<manuscript title>",
-      "reviewRound": <integer>,
-      "status":      "in review"
-    },
-    "reviewedAt":   "<ISO timestamp>",
-    "reviewers": [
-      {
-        "role":           "<reviewer role>",
-        "diagnosis":      "<max 500 chars — diagnostic summary only>",
-        "recommendation": "<max 500 chars>",
-        "confidence":     "high" | "medium" | "low"
-      }
-    ],
-    "unresolvedQuestions": ["<max 300 chars each>"],
-    "rulings": [
-      { "on": "<max 300 chars>", "decision": "<max 500 chars>" }
-    ],
-    "nextDecision":  "<max 300 chars>",
-    "sourceLabel":   "Claude Editorial Board · automated",
-    "updatedAt":     "<ISO timestamp>",
-    "updatedBy":     "claude"
-  }
+  "sourceUpdatedAt": "<exact Date.toISOString() of the review>",
+  "data": { "…": "the §2b data object" }
 }
 ```
 
-Content rules (strictly enforced by companion inbox validator):
-- `diagnosis` and `recommendation` are short diagnostic summaries. No manuscript
-  body text. No private transcript excerpts.
-- `unresolvedQuestions` and `rulings` contain only short strings. No long form text.
-- No vault paths, no note bodies, no credentials anywhere in the payload.
+The `data` object matches `docs/INGESTION_CONTRACT.md` §2b exactly, with these
+authority bindings (enforced by the companion validator and the server):
+- **`rulings` is always `[]`** — automated output never originates a ruling.
+- **`updatedBy` is exactly `"claude"`** and **`sourceLabel` is exactly
+  `"Claude Editorial Board · automated"`** (provenance is fixed, not trusted).
+- **`manuscript.status` is `"in review"` or `"awaiting ruling"`** — never
+  `"complete"` (human-attested state).
+- **No `deferredThreads`** and no other field outside the §2b schema (unknown
+  field → 400).
+- No manuscript body, transcript, filesystem path, `.md` filename, or credential
+  anywhere.
 
-The `revision` field in the inbox file starts at 1 for each new review round.
-The companion may increment it if it needs to resubmit.
+The companion (WS-2) owns the entire transport envelope — `schemaVersion`,
+`source: "editorial-board-inbox"`, `projectedAt`, `revision` (from its
+persistent per-endpoint sequence), and `payloadHash`. The skill never chooses
+any of them. See `docs/EDITORIAL_BOARD_OUTPUT.md` for the full schema, length
+caps, filename convention, creation semantics, and content prohibitions.
 
 ---
 
@@ -162,8 +145,10 @@ The companion may increment it if it needs to resubmit.
    submitted.
 5. Verify that Studio Iteration view reflects the new board state.
 6. Verify the inbox file is deleted after successful submission.
-7. If step 3 fails (Write tool cannot reach the path), evaluate the fallback
-   mechanism (direct POST with secret from companion config, not general env).
+7. If step 3 fails (the Write tool cannot create the artifact with the required
+   non-overwriting, no-partial-visibility semantics), STOP and return to the
+   Coordinator for a new delivery mechanism — never broaden permissions, expose
+   the secret, or add a direct-POST fallback.
 
 ---
 

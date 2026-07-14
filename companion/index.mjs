@@ -9,8 +9,9 @@
  *   4. Open the status store (two persisted revision sequences).
  *   5. Startup inbox drain, then live inbox watch.
  *   6. Vault watcher (debounced, single-flight) + initial sync.
- *   7. Reconciliation timer (default 6h) — idempotent reconciliations refresh
- *      the server heartbeat (§6 freshness rule).
+ *   7. Reconciliation timer (default 6h) — reprojects the vault (idempotent
+ *      reconciliations refresh the server heartbeat, §6) and drains the inbox
+ *      (safety net for any artifact the live watcher missed, LOW-2).
  *   8. SIGUSR1 → immediate sync + inbox drain. SIGTERM/SIGINT → clean shutdown.
  *
  * The companion never writes the vault, never writes data/projections/*.json,
@@ -88,6 +89,11 @@ async function main() {
   const reconcile = setInterval(() => {
     logger.info("reconciliation sync (interval)");
     void vault.runner.runNow();
+    // LOW-2 (UXI-8): also drain the inbox on the interval, so an artifact the
+    // live watcher missed (e.g. an event dropped, or a metacharacter inbox
+    // path) is still submitted within one reconcile cycle — a safety net
+    // matching the vault projection's periodic reconciliation.
+    void inbox.drainNow();
   }, config.reconcileIntervalMs);
 
   process.on("SIGUSR1", () => {

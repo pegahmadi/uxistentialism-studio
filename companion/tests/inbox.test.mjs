@@ -12,6 +12,7 @@ import {
   ensureInboxDirs,
   waitForStableSize,
   createInboxWatcher,
+  createInboxEventFilter,
   artifactLabel,
 } from "../inbox-watcher.mjs";
 import { createLogger } from "../logger.mjs";
@@ -258,6 +259,93 @@ console.log("fs error logging (FIX 12): code only, never a message with the file
   }
   check("fs error code surfaced", lines.some((l) => l.includes("could not remove") && l.includes("EACCES")), lines);
   check("fs error message (with the filename) never survives", lines.every((l) => !l.includes("confidential") && !l.includes(sensitiveName)), lines.filter((l) => l.includes("confidential")));
+}
+
+console.log("LOW-2 (UXI-8) event filter — direct-child *.json only:");
+{
+  const dir = path.join(base, "filter");
+  const rel = createInboxEventFilter(dir);
+  check("direct .json child matches", rel(path.join(dir, "editorial-board-2026-07-12T18-04-07-123Z-a1.json")) === true);
+  check("rejected/ child excluded", rel(path.join(dir, "rejected", "x.json")) === false);
+  check("non-.json direct child excluded", rel(path.join(dir, "notes.txt")) === false);
+  check("nested .json excluded (depth > 1)", rel(path.join(dir, "sub", "x.json")) === false);
+  check("path outside the inbox excluded", rel(path.join(base, "elsewhere.json")) === false);
+  check("non-string input excluded", rel(null) === false);
+  // Metacharacter inbox path: the filter is path-relative, so it is unaffected.
+  const meta = path.join(base, "My Inbox (backup)");
+  const relMeta = createInboxEventFilter(meta);
+  check("metacharacter inbox path: direct .json still matches", relMeta(path.join(meta, "a.json")) === true);
+  check("metacharacter inbox path: rejected/ still excluded", relMeta(path.join(meta, "rejected", "a.json")) === false);
+}
+
+console.log("LOW-2 live watcher — metacharacter inbox path detects a new artifact:");
+{
+  // The exact bug: with the old `{inboxPath}/*.json` watch, glob metacharacters
+  // in the path made chokidar match nothing, so this add would never fire.
+  const dir = path.join(base, "Board Inbox (v2) [live]"); // parens AND brackets
+  await ensureInboxDirs(dir);
+  let drains = 0;
+  const watcher = createInboxWatcher({
+    inboxPath: dir,
+    logger: createLogger({ redactions: [[SECRET, "[redacted-secret]"]], sink: () => {} }),
+    stability: { intervalMs: 5, stableChecks: 1, maxWaitMs: 300 },
+    debounceMs: 20,
+    submit: async () => {
+      drains += 1;
+      return { outcome: "success", status: "accepted" };
+    },
+  });
+  await watcher.start(); // startup drain (empty) + live watch
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  await wait(150); // let chokidar settle its initial scan
+  const before = drains;
+  await writeFile(path.join(dir, artifactName("2026-07-12T09:00:00.000Z", "live1")), JSON.stringify(validArtifact()));
+  for (let i = 0; i < 40 && drains === before; i++) await wait(50); // await the live event
+  await watcher.close();
+  check("live add under a metacharacter path triggered a drain", drains > before, { before, after: drains });
+  check("the newly created artifact was submitted and removed", (await listInbox(dir)).length === 0);
+}
+
+console.log("LOW-2 reconciliation recovers a watcher-missed artifact (drainNow):");
+{
+  // Reconciliation calls drainNow() (wired in index.mjs). Simulate a MISSED
+  // live event by placing a file with NO watcher running, then draining.
+  const dir = path.join(base, "missed");
+  await ensureInboxDirs(dir);
+  await writeFile(path.join(dir, artifactName("2026-07-12T09:00:00.000Z", "m1")), JSON.stringify(validArtifact()));
+  const { watcher, submitted } = makeWatcher(dir, () => ({ outcome: "success", status: "accepted" }));
+  await watcher.drainNow(); // what the reconcile interval invokes
+  check("drainNow submitted the missed artifact", submitted.length === 1, submitted.length);
+  check("missed artifact removed after recovery", (await listInbox(dir)).length === 0);
+  watcher.close();
+}
+
+console.log("LOW-2 live watcher ignores the rejected/ subtree (no self-retrigger):");
+{
+  const dir = path.join(base, "no-retrigger");
+  await ensureInboxDirs(dir);
+  let submits = 0;
+  const watcher = createInboxWatcher({
+    inboxPath: dir,
+    logger: createLogger({ redactions: [[SECRET, "[redacted-secret]"]], sink: () => {} }),
+    stability: { intervalMs: 5, stableChecks: 1, maxWaitMs: 300 },
+    debounceMs: 20,
+    // Always reject → the file is renamed into rejected/. The move must NOT
+    // fire another watched "add" (rejected/ is ignored + depth 0).
+    submit: async () => {
+      submits += 1;
+      return { outcome: "validation-error" };
+    },
+  });
+  await watcher.start();
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  await wait(150);
+  await writeFile(path.join(dir, artifactName("2026-07-12T09:00:00.000Z", "r1")), JSON.stringify(validArtifact()));
+  for (let i = 0; i < 40 && submits === 0; i++) await wait(50);
+  await wait(300); // give any spurious rejected/ event time to (not) fire
+  await watcher.close();
+  check("the artifact was processed exactly once (rejected/ move did not retrigger)", submits === 1, submits);
+  check("artifact quarantined in rejected/", (await listRejected(dir)).length === 1);
 }
 
 await rm(base, { recursive: true, force: true });

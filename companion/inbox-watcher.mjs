@@ -72,6 +72,28 @@ export function orderInboxFiles(entries) {
   });
 }
 
+/**
+ * Pure event filter: does an absolute fs path represent a live inbox artifact?
+ *
+ * LOW-2 (UXI-8): the watcher watches the inbox DIRECTORY, not a
+ * `{inboxPath}/*.json` glob — an inbox path containing glob metacharacters
+ * (e.g. ".../My Inbox (backup)") would otherwise be parsed as extglob and
+ * silently match nothing, dropping every live `add` event. This filter accepts
+ * ONLY a direct-child `*.json` file, so events for the `rejected/` quarantine
+ * subtree and non-JSON files are ignored — matching what the readdir-based
+ * drain already processes. Exported so the semantics are testable without
+ * chokidar.
+ */
+export function createInboxEventFilter(inboxPath) {
+  return (absPath) => {
+    if (typeof absPath !== "string" || absPath.length === 0) return false;
+    const rel = path.relative(inboxPath, absPath);
+    if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) return false; // outside the inbox
+    if (rel.split(path.sep).length !== 1) return false; // direct child only (excludes rejected/*)
+    return rel.endsWith(".json");
+  };
+}
+
 /** Create/verify inbox + rejected/ with mode 700 (repairing looser modes). */
 export async function ensureInboxDirs(inboxPath, logger) {
   for (const dir of [inboxPath, path.join(inboxPath, "rejected")]) {
@@ -229,12 +251,31 @@ export function createInboxWatcher({ inboxPath, submit, logger, stability = {}, 
     async start() {
       await ensureInboxDirs(inboxPath, logger);
       await runner.runNow(); // startup drain (serialized with any live trigger)
-      watcher = chokidar.watch(path.join(inboxPath, "*.json"), {
+      // Watch the inbox DIRECTORY itself — no glob in the watch path (LOW-2):
+      // an inbox path with glob metacharacters would break a `*.json` watch.
+      // depth 0 keeps traversal at the top level; `ignored` prunes the
+      // rejected/ quarantine dir; `relevant` filters surviving events to
+      // direct-child *.json files. followSymlinks: false for consistency with
+      // the vault watcher (an inbox symlink must not pull in outside paths).
+      const relevant = createInboxEventFilter(inboxPath);
+      watcher = chokidar.watch(inboxPath, {
         persistent: true,
         ignoreInitial: true,
         depth: 0,
+        followSymlinks: false,
+        // LOW-2 core: treat the watch path LITERALLY. chokidar v3 otherwise
+        // parses glob metacharacters in the path string itself, so an inbox at
+        // e.g. ".../My Inbox (backup)" would match nothing and never fire.
+        disableGlobbing: true,
+        ignored: (watchedPath) => {
+          const rel = path.relative(inboxPath, watchedPath);
+          if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) return false;
+          return rel.split(path.sep)[0] === "rejected"; // never watch the quarantine subtree
+        },
       });
-      watcher.on("add", () => runner.trigger());
+      watcher.on("add", (p) => {
+        if (relevant(p)) runner.trigger();
+      });
       // err.code only — watcher error messages can embed filenames (FIX 12).
       watcher.on("error", (e) => logger.error(`inbox watcher error: ${e?.code ?? "unknown"}`));
       logger.info("inbox watcher ready");

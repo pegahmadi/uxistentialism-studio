@@ -1,18 +1,33 @@
 import { IDEAS, writingInMode, PRODUCTS, QUESTIONS } from "@/lib/content";
-import { getConcepts, getConcept, getEmerging } from "@/lib/projection";
+import { getConcepts, getConcept, getEmerging, getProjection } from "@/lib/projection";
 
+export const dynamic = "force-dynamic";
+
+// Curated content may live at module scope; DATA reads may not (§8) — they
+// happen inside the async page, one snapshot per request.
 const authorityLineage = IDEAS.find((i) => i.id === "authority-architecture")!.lineage ?? [];
-const authority = getConcept("authority-architecture");
 const traveled = writingInMode("memory").filter((w) => w.status === "published");
 const magnolia = PRODUCTS[0];
 const question = QUESTIONS.find((q) => q.id === "what-remembered")!;
-const canon = getConcepts();
-const emerging = getEmerging();
-const fromVault = authority?.source === "vault";
 
 const PHASES = ["2024 · BORROWED", "2025 · DEFINED", "2026 · EXPANDED"];
 
-export default function MemoryPage() {
+export default async function MemoryPage() {
+  // Snapshot rule (§8): one projection snapshot; every view derives from it.
+  const projection = await getProjection();
+  const authority = getConcept(projection, "authority-architecture");
+  const canon = getConcepts(projection);
+  const emerging = getEmerging(projection);
+  const fromVault = authority?.source === "vault";
+  // Data-layer provenance (§8): live names its sync state; fixture says so.
+  const vaultProvenance =
+    projection.source === "live"
+      ? projection.stale || !projection.lastSuccessfulSync
+        ? "from the vault · live · stale"
+        : "from the vault · live"
+      : projection.source === "fallback"
+        ? "from the vault · fixture"
+        : "curated";
   return (
     <div className="mx-auto flex max-w-[680px] flex-col gap-[30px] px-9 pb-[72px] pt-[84px]" style={{ color: "#D6D3D1" }}>
       <div>
@@ -53,7 +68,7 @@ export default function MemoryPage() {
           <div className="relative opacity-90">
             <span className="absolute -left-[31px] top-1 h-2 w-2 rounded-full border border-dashed" style={{ borderColor: "#78716C", background: "#1C1917" }} />
             <div className="font-mono text-[11px] font-semibold tracking-[0.08em]" style={{ color: "#A8A29E" }}>
-              AHEAD · STILL FORMING {emerging.length > 0 && <span style={{ color: "#57534E" }}>· from the vault</span>}
+              AHEAD · STILL FORMING {emerging.length > 0 && <span style={{ color: "#57534E" }}>· {vaultProvenance}</span>}
             </div>
             {emerging.length > 0 ? (
               <div className="mt-1.5 text-[14px] leading-[1.7]" style={{ color: "#A8A29E" }}>
@@ -119,7 +134,8 @@ export default function MemoryPage() {
       <div className="border-t pt-6" style={{ borderColor: "#44403C" }}>
         <div className="flex items-baseline gap-2 font-mono text-[11px] font-semibold tracking-[0.08em]" style={{ color: "#78716C" }}>
           <span>THE CANON · LIVING VOCABULARY</span>
-          <span style={{ color: "#57534E" }}>· {canon[0]?.source === "vault" ? "from the vault" : "curated"}</span>
+          {/* data-layer provenance — live / fixture / stale, never silent (§8) */}
+          <span style={{ color: "#57534E" }}>· {canon[0]?.source === "vault" ? vaultProvenance : "curated"}</span>
         </div>
         <div className="mt-3.5 flex flex-wrap gap-2 text-[12px] font-medium">
           {canon.map((c) => (

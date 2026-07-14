@@ -1,18 +1,22 @@
-// Reads the Editorial Board projection (data/projections/editorial-board.json):
-// a sanitized, human-curated snapshot of a completed Claude Editorial Board review
-// that the Studio's Iteration view reads. It lives in data/projections/ (not
-// data/studio/) because it is a projection of an EXTERNAL source's output — the
-// same architectural role as the Obsidian projection — not your authored state.
+// Editorial Board reader — request-time Upstash Redis primary path with the
+// committed fixture (data/projections/editorial-board.json) as fallback
+// (contract §8). The fixture is a sanitized, human-curated snapshot of a
+// completed board review; live values arrive through POST /api/ingest/
+// editorial-board and hold only short, public-safe diagnostic summaries —
+// never the manuscript body, never keys, never private transcripts.
 //
-// The app reads ONLY this committed file. It never calls the Claude API, never
-// runs a review, and never reads a private transcript. The projection holds only
-// short, public-safe diagnostic summaries — never the manuscript body, never keys.
+// Authority rule (v1, §2b): live board content is ADVICE. The ingestion
+// endpoint rejects every non-empty `rulings` array, and this reader
+// additionally strips rulings from live data as defense in depth — rulings may
+// render as human decisions only from the human-curated committed fixture.
 //
-// Server-only (fs). Never throws: returns null when the file is absent, malformed,
-// or empty, so callers fall back to curated content.
+// Server-only. Never throws: falls back when Redis/file are absent, malformed,
+// or empty, so callers degrade to curated content.
 
 import fs from "node:fs";
 import path from "node:path";
+import { getRedis, readSnapshot } from "@/lib/redis";
+import { isStale, type DataResult } from "@/lib/data-result";
 
 export const EDITORIAL_BOARD_SCHEMA_VERSION = 1;
 
@@ -50,6 +54,8 @@ export interface EditorialBoard {
   updatedAt: string | null;
   updatedBy: "human" | "claude" | null;
 }
+
+export type EditorialBoardResult = DataResult<EditorialBoard | null>;
 
 // ---- coercers: tolerate anything, only accept well-typed values ----
 
@@ -115,20 +121,8 @@ function rulings(v: unknown): BoardRuling[] {
     .filter((x): x is BoardRuling => x !== null);
 }
 
-function boardPath(): string {
-  return path.join(process.cwd(), "data", "projections", "editorial-board.json");
-}
-
-/** Read + normalize the board projection. Never throws; null when unusable. */
-export function getEditorialBoard(): EditorialBoard | null {
-  let raw: unknown;
-  try {
-    const p = boardPath();
-    if (!fs.existsSync(p)) return null;
-    raw = JSON.parse(fs.readFileSync(p, "utf8"));
-  } catch {
-    return null;
-  }
+/** Normalize any raw value into a usable board, or null when contentless. */
+function normalize(raw: unknown): EditorialBoard | null {
   if (!raw || typeof raw !== "object") return null;
   const o = raw as Record<string, unknown>;
 
@@ -146,13 +140,74 @@ export function getEditorialBoard(): EditorialBoard | null {
     updatedBy: oneOf<"human" | "claude">(o.updatedBy, ["human", "claude"]),
   };
 
-  // A present-but-contentless file is treated as absent, so Iteration falls back.
+  // A present-but-contentless value is treated as absent, so Iteration falls back.
   const hasContent =
     board.manuscript || board.reviewers.length || board.rulings.length || board.unresolvedQuestions.length || board.nextDecision;
   return hasContent ? board : null;
 }
 
+function readFixture(): EditorialBoard | null {
+  try {
+    const p = path.join(process.cwd(), "data", "projections", "editorial-board.json");
+    if (!fs.existsSync(p)) return null;
+    return normalize(JSON.parse(fs.readFileSync(p, "utf8")));
+  } catch {
+    return null;
+  }
+}
+
+function fixtureResult(error: string | null): EditorialBoardResult {
+  const fixture = readFixture();
+  if (fixture) return { data: fixture, source: "fallback", lastSuccessfulSync: null, stale: true, error };
+  return { data: null, source: "default", lastSuccessfulSync: null, stale: true, error };
+}
+
+/**
+ * The one snapshot per request (§8): Redis primary, fixture fallback. Data +
+ * metadata arrive in ONE atomic MGET (v1.1.2) so a concurrent ingestion can
+ * never yield a mixed data/meta pair; never throws.
+ */
+export async function getEditorialBoard(): Promise<EditorialBoardResult> {
+  const redis = getRedis();
+  if (!redis) return fixtureResult(null); // unconfigured Redis is an explicit fallback condition
+
+  let rawData: unknown;
+  let rawMeta: unknown;
+  try {
+    ({ rawData, rawMeta } = await readSnapshot(redis, "editorial-board"));
+  } catch {
+    return fixtureResult("redis_unreachable");
+  }
+
+  if (typeof rawData === "string" && rawData.length) {
+    try {
+      const board = normalize(JSON.parse(rawData));
+      if (board) {
+        // v1 authority rule: live board content is advice only. Rulings render
+        // as human decisions only from the committed fixture — never from Redis.
+        board.rulings = [];
+        let lastSuccessfulSync: string | null = null;
+        if (typeof rawMeta === "string" && rawMeta.length) {
+          try {
+            const meta: unknown = JSON.parse(rawMeta);
+            if (meta && typeof meta === "object") {
+              const v = (meta as Record<string, unknown>).lastSuccessfulSync;
+              if (typeof v === "string") lastSuccessfulSync = v;
+            }
+          } catch {
+            /* missing/invalid metadata must never appear fresh — stays null */
+          }
+        }
+        return { data: board, source: "live", lastSuccessfulSync, stale: isStale(lastSuccessfulSync), error: null };
+      }
+    } catch {
+      return fixtureResult("malformed_live_data");
+    }
+  }
+  return fixtureResult(null); // reachable Redis, key absent → fixture
+}
+
 /** Whether a usable board projection is present (vs. curated fallback). */
-export function boardSource(): "projection" | "none" {
-  return getEditorialBoard() ? "projection" : "none";
+export function boardSource(result: EditorialBoardResult): "projection" | "none" {
+  return result.data ? "projection" : "none";
 }

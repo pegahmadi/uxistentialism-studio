@@ -1,6 +1,10 @@
 # UXistentialism Studio — Ingestion Contract
 
-Version: 1.1.2 · 2026-07-12
+Version: 1.1.3 · 2026-07-12
+
+**v1.1.3 (deployment binding):** accepted Redis env-var pairs — canonical
+first, deployed Marketplace pair second, pair-atomic resolution (§8).
+Documentation-only; no schema, key, or auth semantics change.
 
 **v1.1.2 corrections (implementation audit):** endpoint-specific `source`
 binding (§2a/§2b); fixed automated provenance on the Editorial Board endpoint
@@ -628,6 +632,28 @@ server-only accessor. Missing or malformed Redis configuration is an explicit
 fallback condition (`source: "fallback"`), never a module-initialization crash:
 pages must remain renderable from fixtures with no Redis env vars present.
 
+**Accepted environment-variable pairs (v1.1.3).** Exactly two name pairs are
+accepted, in precedence order:
+
+1. `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN` (canonical
+   `@upstash/redis` names — always first choice);
+2. `UPSTASH_REDIS_REST_KV_REST_API_URL` +
+   `UPSTASH_REDIS_REST_KV_REST_API_TOKEN` (the deployed Vercel Marketplace
+   binding, created 2026-07-12 with a Custom Prefix of `UPSTASH_REDIS_REST`,
+   which the Marketplace prepends to its native `KV_REST_API_*` names; the
+   binding cannot be safely recreated through the confirmed dashboard UI, so
+   these generated names are supported as a documented deployment reality).
+
+Resolution is **pair-atomic**: a pair is used only when both of its names are
+present and non-empty; URL and token are never mixed across schemes; a partial
+higher-precedence pair is skipped and does not prevent a complete
+lower-precedence pair from being used; no complete pair → fallback rendering.
+TCP and read-only variables (`REDIS_URL`, `KV_URL`, `*_READ_ONLY_*`) are never
+consumed. Diagnostics may name variables — never values. If the Marketplace
+binding is ever recreated without a prefix, supporting the native
+`KV_REST_API_*` names requires a further one-line amendment (deliberately not
+pre-added, to keep the accepted surface minimal).
+
 **Snapshot rule.** Each page request loads **one** `DataResult<T>` snapshot per
 data source and derives every view (concepts, graph, graph details, emerging,
 etc.) from that single snapshot, with one metadata read. Derived views must not
@@ -734,4 +760,4 @@ the companion generated and fix the root cause before re-enabling sync.
 
 ---
 
-*End of Ingestion Contract v1.1.2*
+*End of Ingestion Contract v1.1.3*

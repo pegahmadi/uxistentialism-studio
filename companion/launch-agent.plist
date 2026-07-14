@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  macOS LaunchAgent TEMPLATE for the Studio Sync companion (WS-2).
+
+  This file is a template only — installation is a MANUAL step (see README.md):
+    1. Replace the three placeholders below:
+         __NODE_PATH__       absolute path to the node binary (run: which node)
+         __COMPANION_DIR__   absolute path to this companion/ directory
+         __LOG_PATH__        the logPath value from your config.json
+    2. Copy to ~/Library/LaunchAgents/com.uxistentialism.studio-companion.plist
+    3. launchctl load ~/Library/LaunchAgents/com.uxistentialism.studio-companion.plist
+
+  Credentials come from ~/.config/uxistentialism-studio/config.json (mode 600),
+  never from environment variables — EnvironmentVariables stays empty.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.uxistentialism.studio-companion</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>__NODE_PATH__</string>
+    <string>__COMPANION_DIR__/index.mjs</string>
+  </array>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>__LOG_PATH__</string>
+
+  <key>StandardErrorPath</key>
+  <string>__LOG_PATH__</string>
+
+  <key>EnvironmentVariables</key>
+  <dict/>
+</dict>
+</plist>

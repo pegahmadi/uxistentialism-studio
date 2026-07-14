@@ -1,0 +1,253 @@
+# WORKSTREAM.md — WS-3: Editorial Board Structured Output
+
+Branch: `ws/editorial-board-output`
+Worktree: `../studio-worktrees/editorial-board-output`
+Status: research and prototype first; production integration only after mechanism is verified
+
+---
+
+## Objective
+
+Define how the UXistentialism Editorial Board v2.1 emits a structured JSON
+artifact automatically at the end of a review session, and how that artifact
+reaches the Studio's ingestion layer without Pegah copying text, editing JSON,
+or running a command. After WS-3, completing a board review and seeing the Studio
+Iteration view update are one action, not two.
+
+---
+
+## Shared contracts implemented
+
+- `CLAUDE.md` — read before writing any code
+- `docs/INGESTION_CONTRACT.md` §2b — the Editorial Board data schema the
+  structured artifact must match exactly
+- `docs/INGESTION_CONTRACT.md` §3 — authentication contract (inbox mechanism
+  keeps the sync secret inside the companion only)
+
+---
+
+## Allowed files
+
+This workstream creates or modifies only:
+
+```
+docs/EDITORIAL_BOARD_OUTPUT.md     (new — output contract for the skill)
+```
+
+The Editorial Board skill itself lives outside this repository (in Cowork skills).
+Changes to it are coordinated here but made there. Do not modify any `app/`,
+`lib/`, or `companion/` files. The companion's inbox-watcher (WS-2) is the
+ingestion mechanism; this workstream defines only the output format and the drop
+mechanism.
+
+---
+
+## Forbidden files
+
+Do not modify:
+- `companion/` — owned by WS-2; the inbox watcher is already defined there
+- `lib/`, `app/`, `data/` — owned by WS-1
+- `CLAUDE.md`, `docs/INGESTION_CONTRACT.md` — read only
+- Obsidian vault — never touched
+
+---
+
+## The delivery mechanism
+
+Editorial Board output enters the Studio through the private watched inbox folder
+(`~/.studio-inbox/`), not through direct API calls. This keeps `STUDIO_SYNC_SECRET`
+inside the companion configuration only — it does not need to be distributed to
+every Claude or Cowork session that might run a board review.
+
+The mechanism:
+
+At the end of a board review session, the Editorial Board skill writes a
+**data-only** JSON artifact to `~/.studio-inbox/` using the Write tool available
+in Cowork. Its name is collision-resistant —
+`editorial-board-<timestamp>-<unique-suffix>.json` — and it is created without
+overwriting any existing path and without exposing a partially-written file (see
+`docs/EDITORIAL_BOARD_OUTPUT.md`). The companion's inbox watcher (WS-2) detects
+the file, validates it against §2b, **builds the entire transport envelope**
+(assigning `revision` from its persistent per-endpoint sequence and computing
+`payloadHash`), POSTs it to `/api/ingest/editorial-board`, and deletes it on
+success. The Studio Iteration view shows updated board state on next navigation.
+
+**There is no direct-POST fallback.** The sync secret is never distributed to a
+board-review session. If the companion is offline, the artifact waits in the
+inbox and is drained when the companion next runs.
+
+---
+
+## Research questions to resolve
+
+Before production integration, verify:
+
+1. **Does the Cowork Write tool have access to `~/.studio-inbox/`?**
+   The skill must be able to write to this path. Verify in a test session before
+   committing to the mechanism.
+
+2. **Does the companion's inbox watcher run reliably when a board review is in
+   progress?**
+   If the companion is paused or offline, the inbox file accumulates. Verify that
+   accumulated files are submitted correctly when the companion restarts.
+
+3. **How does the board review currently end?**
+   Understand the final state the skill produces before adding a structured
+   output step. The additional step must not disrupt the primary review flow.
+
+4. **What is the right delineation between the free-form review (for Pegah to
+   read) and the structured artifact (for the Studio)?**
+   The structured artifact is a projection summary; it must not contain the
+   manuscript body or the full review transcript.
+
+---
+
+## Output contract for the Editorial Board skill
+
+The canonical output contract is **`docs/EDITORIAL_BOARD_OUTPUT.md`**. In
+summary, the skill's final step writes a **data-only** artifact with exactly two
+top-level keys — it never constructs a transport envelope:
+
+```json
+{
+  "sourceUpdatedAt": "<exact Date.toISOString() of the review>",
+  "data": { "…": "the §2b data object" }
+}
+```
+
+The `data` object matches `docs/INGESTION_CONTRACT.md` §2b exactly, with these
+authority bindings (enforced by the companion validator and the server):
+- **`rulings` is always `[]`** — automated output never originates a ruling.
+- **`updatedBy` is exactly `"claude"`** and **`sourceLabel` is exactly
+  `"Claude Editorial Board · automated"`** (provenance is fixed, not trusted).
+- **`manuscript.status` is `"in review"` or `"awaiting ruling"`** — never
+  `"complete"` (human-attested state).
+- **No `deferredThreads`** and no other field outside the §2b schema (unknown
+  field → 400).
+- No manuscript body, transcript, filesystem path, `.md` filename, or credential
+  anywhere.
+
+The companion (WS-2) owns the entire transport envelope — `schemaVersion`,
+`source: "editorial-board-inbox"`, `projectedAt`, `revision` (from its
+persistent per-endpoint sequence), and `payloadHash`. The skill never chooses
+any of them. See `docs/EDITORIAL_BOARD_OUTPUT.md` for the full schema, length
+caps, filename convention, creation semantics, and content prohibitions.
+
+---
+
+## Prototype plan
+
+1. Run a board review session normally and observe the final output structure.
+2. Add a structured output step to the skill that produces the JSON in the
+   correct schema (without submitting it anywhere yet).
+3. Have the skill write the file to `~/.studio-inbox/` (verify Write tool access).
+4. With WS-2 companion running, confirm the file is picked up, validated, and
+   submitted.
+5. Verify that Studio Iteration view reflects the new board state.
+6. Verify the inbox file is deleted after successful submission.
+7. If step 3 fails (the Write tool cannot create the artifact with the required
+   non-overwriting, no-partial-visibility semantics), STOP and return to the
+   Coordinator for a new delivery mechanism — never broaden permissions, expose
+   the secret, or add a direct-POST fallback.
+
+---
+
+## Acceptance criteria
+
+1. Completing a board review session produces a structured JSON file in
+   `~/.studio-inbox/` with no action from Pegah beyond running the review.
+2. The companion picks up the file within a few seconds and submits it.
+3. The Studio Iteration view shows the updated board state on next navigation.
+4. The inbox file is deleted after successful submission.
+5. A rejected file (invalid schema) moves to `~/.studio-inbox/rejected/` with
+   the original filename and a visible log error.
+6. The sync secret does not appear anywhere in the board review session output,
+   logs, or the inbox file itself.
+7. The full review transcript does not appear in the submitted payload.
+
+---
+
+## Security requirements
+
+- The sync secret must not be distributed to board review sessions.
+- The inbox mechanism keeps credentials inside the companion only.
+- Manuscript body text must not appear in the structured output.
+- Only the Editorial Board skill (via Write tool) and the companion (reading for
+  submission) should access `~/.studio-inbox/`. The directory should be mode 700.
+
+---
+
+## Test plan
+
+1. Prototype: manually write a valid inbox JSON file and verify companion picks
+   it up and submits it.
+2. Prototype: manually write an invalid inbox file and verify it moves to rejected/.
+3. Integration: run a board review, verify the file appears, verify submission.
+4. Regression: verify that the board review primary output (free-form text for
+   Pegah) is unchanged by the additional structured output step.
+
+---
+
+## Handoff requirements
+
+Before marking WS-3 complete:
+- `docs/EDITORIAL_BOARD_OUTPUT.md` written with the complete output contract
+- All research questions resolved with documented answers
+- Prototype verified end-to-end with a real board review
+- All acceptance criteria pass
+- No secrets, no manuscript bodies in any submitted payload (confirmed in Upstash
+  console or via sync-status endpoint)
+
+---
+
+## Known dependencies
+
+- **WS-2 companion inbox watcher must be running** for this workstream to complete
+  its end-to-end acceptance test. WS-2 must be complete before the full test.
+- **WS-1 must be deployed** for the Studio to reflect updated board state.
+- This workstream does not modify any code in this repository; it produces
+  documentation and a skill update (external). If the prototype reveals that the
+  companion needs a behavioral change, that change is a WS-2 amendment, not a
+  WS-3 change.
+
+---
+
+## Coordinator Amendment — contract v1.1.0 (2026-07-12)
+
+*Added under the documented coordinator exception (see CLAUDE.md ownership
+table) after an independent audit and human-approved rulings. Where this
+section conflicts with anything above, **this section and
+`docs/INGESTION_CONTRACT.md` v1.1.0 govern.** Re-read the full contract before
+replanning.*
+
+1. **Emit data, not an envelope.** The Editorial Board skill's artifact is
+   **data-only**: the §2b `data` object plus a source-event timestamp the
+   companion can use for `sourceUpdatedAt`. The skill never chooses
+   `schemaVersion`, `source`, `revision`, or `payloadHash` — the companion
+   (WS-2) owns the entire transport envelope and assigns revisions from its
+   persistent per-endpoint sequence. Replace the original brief's
+   envelope-shaped example accordingly in `docs/EDITORIAL_BOARD_OUTPUT.md`.
+2. **Authority rule: automated output keeps `rulings: []`.** The server
+   rejects every non-empty `rulings` array regardless of `updatedBy` (§2b).
+   `updatedBy: "claude"` is provenance, never authorization. `nextDecision`
+   may describe what needs Pegah's judgment; reviewer recommendations remain
+   advice; **no field may imply Pegah decided something she did not
+   explicitly decide.** Live human rulings await a future human-authorized
+   write path (a versioned contract change) — out of WS-3 scope.
+3. **The direct-POST (curl) fallback is removed.** Never distribute the sync
+   secret to a board-review session. If the companion is offline, the
+   artifact waits in the inbox and is drained when the companion restarts.
+   Delete the fallback option from the delivery-mechanism section of the
+   output contract.
+4. **Inbox-write capability stays a formal research gate.** If the skill
+   cannot write to `~/.studio-inbox/`: do not broaden filesystem permissions,
+   do not move the secret into the board session — return to the Coordinator
+   for a new delivery mechanism.
+5. **Timestamps** in the artifact use the exact `Date.toISOString()` format
+   (§1).
+
+**Adjusted acceptance criteria:** the artifact contains no manuscript body or
+transcript; automated artifacts contain no rulings; the companion assigns
+envelope revision/hash and submits successfully; Iteration shows advice as
+advice; only explicit human decisions (currently: the human-curated fixture)
+ever appear as rulings.

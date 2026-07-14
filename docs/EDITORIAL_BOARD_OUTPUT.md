@@ -1,10 +1,14 @@
 # Editorial Board Output Contract (WS-3)
 
 **Status:** Phase B — output contract documented against ingestion contract
-**v1.1.3** (UXI-18, 2026-07-14). The end-to-end delivery mechanism (RQ1) is
-**not yet empirically verified** — see [Delivery mechanism](#delivery-mechanism)
-and [Research questions](#research-questions). Nothing here asserts that the
-Cowork workflow has been tested.
+**v1.1.3** (UXI-18, 2026-07-14). A reference publisher
+(`docs/editorial-board-publisher.mjs`) now specifies the skill's end-of-review
+step in reviewable, path-tested code — but the end-to-end delivery mechanism
+(RQ1) is still **not empirically verified in a real Cowork session** — see
+[Reference publisher](#reference-publisher-the-skills-end-of-review-step),
+[Delivery mechanism](#delivery-mechanism), and
+[Research questions](#research-questions). Nothing here asserts that the Cowork
+workflow has been tested.
 
 This document specifies the artifact the UXistentialism Editorial Board skill
 (hosted externally, in Cowork — not in this repository) writes at the end of a
@@ -170,6 +174,47 @@ for nonconforming names).
 
 ---
 
+## Reference publisher (the skill's end-of-review step)
+
+`docs/editorial-board-publisher.mjs` is the reviewable, path-tested reference for
+the skill's final step. It performs **only** the safety-critical, deterministic
+parts; the skill orchestrates around it and inserts the human checkpoint. Two
+subcommands, with Pegah's explicit approval between them:
+
+- **`prepare`** — reads the two-key artifact on stdin, runs `validateInboxArtifact`
+  (§2b), checks length caps, and runs the public-safety scan. **If validation
+  fails, any length cap is exceeded, or the scan reports any hit → it prints
+  `BLOCKED <reason>`, writes no temp, and exits non-zero.** Publish is never
+  offered for a failing artifact, and nothing is left behind. On a full pass it
+  writes a non-`.json` temp the companion ignores (`.eb-publish-<uuid>.tmp`, in
+  the inbox so the later hard link stays on one filesystem), prints the bounded
+  checkpoint report (metadata + the exact reviewer/question/nextDecision
+  summaries that will become live Iteration content — there is no manuscript body
+  in the artifact), and prints `READY <tempPath>`.
+- **`publish <tempPath>`** — hard-links the approved temp to the final
+  `editorial-board-<ts>-<uuid>.json`. A hard link is atomic, never overwrites,
+  and never exposes a partial file. **Any link failure — not only `EEXIST` —
+  deletes the temp, prints `FAILED <code>`, and exits non-zero; it never retries
+  with `mv`, `cp`, overwrite, or a direct POST.** On success it deletes the temp
+  (the final link persists until the companion submits it) and prints
+  `PUBLISHED <name>`.
+
+On any failure at any step the temp is removed: review data is never left in the
+inbox or in `/tmp`. The publisher never constructs a transport envelope, chooses
+`revision`/`payloadHash`, authenticates to the Studio, holds the sync secret, or
+asserts human authorship — those remain the companion's and the human write
+path's alone.
+
+**This reference does not itself resolve RQ1.** It is the mechanism to be
+validated in a real Cowork board session (Phase C), and only if that session can
+actually run it (hard links available on the inbox's filesystem). If the Cowork
+environment cannot execute this publish primitive with the no-overwrite and
+no-partial-visibility guarantees above, the skill must **stop and return to the
+Coordinator** — never broaden permissions, expose or relocate the sync secret, or
+invent a fallback.
+
+---
+
 ## Content prohibitions
 
 The artifact is a short, public-safe **projection summary** — never source
@@ -187,9 +232,10 @@ Keep every string within its length cap; caps exist so summaries stay summaries.
 
 ## Delivery mechanism
 
-Delivery is **exclusively** the watched inbox `~/.studio-inbox/`. There is **no
-direct-POST fallback**: the sync secret is never distributed to a board-review
-session. If the companion is offline when the artifact is written, the file
+Delivery is **exclusively** the watched inbox `~/.studio-inbox/`, written by the
+[reference publisher](#reference-publisher-the-skills-end-of-review-step). There
+is **no direct-POST fallback**: the sync secret is never distributed to a
+board-review session. If the companion is offline when the artifact is written, the file
 simply waits in the inbox and is drained when the companion next runs (startup
 drain + the periodic reconciliation, per WS-2). The mode-700 inbox and its
 `rejected/` subdirectory are created and verified by the companion.

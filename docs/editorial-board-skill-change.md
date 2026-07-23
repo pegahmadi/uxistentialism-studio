@@ -136,17 +136,20 @@ then hard-links into place.
   temp could not be removed — surface it; do not republish.
 - **`FAILED <code>` (ANY failure — `digest-mismatch`, `revalidation-failed`, a
   `link-*` error, a rejected token, etc.)** → publication failed and nothing was
-  written. The publisher has already removed the staged temp. The skill STOPS and
-  reports. **Never** retry with `mv`, `cp`, overwrite, or a direct POST, and never
-  broaden permissions or move the secret.
+  written. The publisher **attempts** to remove the staged temp; a trailing
+  `WARN cleanup-failed <code>` means the staged non-`.json` temp may remain. The
+  skill STOPS and reports. **Never** retry with `mv`, `cp`, overwrite, or a direct
+  POST, never broaden permissions or move the secret, and if a cleanup warning
+  appears do not construct or `rm` a path manually — hand it to the Coordinator.
 
 ### S6 — Cleanup (always)
 
-The publisher removes the staged temp on success and on every failure path, and
-surfaces any cleanup failure generically. If the skill aborts between steps
-(e.g. on decline at S4), it cleans up **by token** via `discard "$TOKEN"` — never
-by constructing or `rm`-ing a path. Review data is never left in the inbox or in
-`/tmp`.
+The publisher **attempts** to remove the staged temp on success and on every
+applicable failure path, and surfaces any cleanup failure generically. If the
+skill aborts between steps (e.g. on decline at S4), it cleans up **by token** via
+`discard "$TOKEN"` — never by constructing or `rm`-ing a path. A cleanup warning
+means the staged non-`.json` temp may remain and must be handled through the
+Coordinator, never manually.
 
 ### What the skill must NEVER do
 

@@ -213,10 +213,13 @@ addressed by **opaque tokens** — never filesystem paths:
   the staged temp (used when Pegah declines at the checkpoint). The skill calls
   this instead of ever running `rm` on a supplied path.
 
-On any failure at any step the temp is removed, and **cleanup failures are
-surfaced generically** (`WARN`/`FAILED cleanup-failed <code>`) — never silently
-ignored, never printing a path. Review data is never left in the inbox or in
-`/tmp`. The publisher never constructs a transport envelope, chooses
+On every applicable failure path the temp's removal is **attempted**, and
+**cleanup failures are surfaced generically** (`WARN`/`FAILED cleanup-failed
+<code>`) — never silently ignored, never printing a path. A cleanup warning means
+the staged non-`.json` temp may remain and must be handled through the
+Coordinator — never republish, and never construct or `rm` a path manually. (An
+`EEXIST` collision is a file the publisher did not create, so it is preserved,
+not removed.) The publisher never constructs a transport envelope, chooses
 `revision`/`payloadHash`, authenticates to the Studio, holds the sync secret, or
 asserts human authorship — those remain the companion's and the human write
 path's alone. (The scratch-inbox override used by the tests is honored only under

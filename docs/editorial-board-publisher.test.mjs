@@ -178,6 +178,22 @@ test("exclusive-create collision → prepare fails closed", () => {
   assert.equal(readFileSync(squat, "utf8"), "PRE-EXISTING", "pre-existing file untouched");
 });
 
+test("staging error (non-EEXIST) attempts cleanup and reports without a path", () => {
+  const inbox = freshInbox();
+  chmodSync(inbox, 0o500); // read+execute, no write → exclusive create fails (EACCES/EPERM), not EEXIST
+  try {
+    const p = run(inbox, ["prepare"], { input: JSON.stringify(validArtifact()), forceId: "f".repeat(32) });
+    assert.equal(p.code, 1);
+    assert.match(p.out, /^BLOCKED staging-error-\w+$/m, "reports a generic staging error");
+    assert.doesNotMatch(p.out, /staging-collision/, "must not be reported as a collision");
+    assert.ok(!p.out.includes(inbox), "no inbox path in output");
+    assert.ok(!/\/(Users|home)\//.test(p.out), "no home path in output");
+    assert.ok(!p.out.includes(".tmp"), "no temp filename in output");
+  } finally {
+    chmodSync(inbox, 0o700);
+  }
+});
+
 test("cleanup failure is surfaced (never silently ignored)", () => {
   const inbox = freshInbox();
   const token = tokenOf(run(inbox, ["prepare"], { input: JSON.stringify(validArtifact()) }).out);

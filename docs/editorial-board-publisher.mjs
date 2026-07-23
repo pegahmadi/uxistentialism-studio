@@ -29,14 +29,17 @@
  *     Never retries with mv, cp, overwrite, or a direct POST.
  *
  *   discard <token>
- *     Resolves the token the same hardened way and removes the staged temp
+ *     Resolves the token the same hardened way and attempts to remove the temp
  *     (used when Pegah declines at the checkpoint). Never operates on a
  *     caller-supplied path.
  *
- * On every failure path the staged temp is removed; review data is never left
- * in the inbox or in /tmp. Cleanup failures are surfaced generically
- * (WARN/FAILED cleanup-failed <code>) — never silently ignored, never printing
- * a path. The publisher never constructs a transport envelope, chooses
+ * On every applicable failure path the staged temp's removal is ATTEMPTED, and a
+ * cleanup failure is surfaced generically (WARN/FAILED cleanup-failed <code>) —
+ * never silently ignored, never printing a path. A cleanup warning means the
+ * staged non-.json temp may still remain; it must then be handled through the
+ * Coordinator — never republish, and never construct or rm a path manually. (An
+ * EEXIST collision is not a temp we created, so it is preserved, not removed.)
+ * The publisher never constructs a transport envelope, chooses
  * revision/payloadHash, authenticates to the Studio, holds the sync secret, or
  * asserts human authorship — those remain the companion's and the human write
  * path's alone.
@@ -156,7 +159,17 @@ function prepare() {
   try {
     writeFileSync(temp, bytes, { flag: "wx", mode: 0o600 }); // wx = exclusive create
   } catch (e) {
-    console.log(e?.code === "EEXIST" ? "BLOCKED staging-collision" : `BLOCKED staging-error-${e?.code ?? "error"}`);
+    if (e?.code === "EEXIST") {
+      // Collision: the path already exists. It is NOT a file we created, so we
+      // never remove it — preserve it and report. No path is printed.
+      console.log("BLOCKED staging-collision");
+      return 1;
+    }
+    // Any other error may have left a partial temp — attempt cleanup and surface
+    // a cleanup failure generically. No path is printed.
+    const rm = removeTemp(temp);
+    console.log(`BLOCKED staging-error-${e?.code ?? "error"}`);
+    warnIfCleanupFailed(rm);
     return 1;
   }
   const token = `${id}-${digest}`;

@@ -12,10 +12,13 @@ Governing docs (read first, in this order):
 
 **Invariants that hold across every part.** Never broaden filesystem
 permissions. Never expose, print, relocate, or copy `STUDIO_SYNC_SECRET`. Never
-add a direct-POST/curl fallback. On any failure, the temp is deleted — review
-data is never left in the inbox or in `/tmp`. The skill never constructs a
-transport envelope, chooses `revision`/`payloadHash`, or asserts human
-authorship (`updatedBy` is provenance, never authorization).
+add a direct-POST/curl fallback. On every applicable failure path, temp removal
+is **attempted** and any cleanup failure is surfaced generically; a cleanup
+warning means the staged non-`.json` temp may remain and must be handled through
+the Coordinator — never republish, and never construct or `rm` a path manually.
+The skill never constructs a transport envelope, chooses
+`revision`/`payloadHash`, or asserts human authorship (`updatedBy` is provenance,
+never authorization).
 
 ---
 
@@ -51,8 +54,10 @@ The skill's steps (summarized; full detail in the skill-change doc):
   overwrite; no partial visibility). **Any digest mismatch, revalidation failure,
   or hard-link failure — not only `EEXIST` — publishes nothing. Never fall back
   to `mv`, `cp`, overwrite, or direct POST.**
-- **S6 Cleanup (always).** Temp removed on success and on every failure path;
-  cleanup failures are surfaced, never silently ignored. The final link persists
+- **S6 Cleanup (attempted).** Temp removal is attempted on success and on every
+  applicable failure path; cleanup failures are surfaced generically, never
+  silently ignored. A cleanup warning means the staged temp may remain — handle
+  it through the Coordinator, never manually. The final link persists
   until the companion submits + removes it.
 
 ---
@@ -141,12 +146,14 @@ construction; also confirm it never appears in the board session's own output.
 - Part B: no hard-link, or no inbox write, in the skill's environment.
 - S3/S4 validation FAIL, caps false, or any public-safety hit → temp deleted, no
   publish.
-- S4 declined → temp deleted, no publish.
-- S5 ANY hard-link failure → temp deleted, no publish; never mv/cp/overwrite/POST.
+- S4 declined → temp removal attempted (`discard`), no publish.
+- S5 ANY hard-link failure → temp removal attempted, no publish; never mv/cp/overwrite/POST.
 - Any Part-D count non-zero, or a Part-D precondition STOP.
 
-Never broaden permissions, expose/relocate the secret, or add a fallback. On any
-failure the temp is deleted (no data left in inbox or `/tmp`).
+Never broaden permissions, expose/relocate the secret, or add a fallback. On
+every applicable failure path temp removal is attempted and any cleanup failure
+is surfaced; a cleanup warning means the staged temp may remain and must be
+handled through the Coordinator, never manually.
 
 ---
 

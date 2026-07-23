@@ -1,10 +1,11 @@
 # Editorial Board Output Contract (WS-3)
 
 **Status:** Phase B — output contract documented against ingestion contract
-**v1.1.3** (UXI-18, 2026-07-14). A reference publisher
-(`docs/editorial-board-publisher.mjs`) now specifies the skill's end-of-review
-step in reviewable, path-tested code — but the end-to-end delivery mechanism
-(RQ1) is still **not empirically verified in a real Cowork session** — see
+**v1.1.3** (UXI-18). **Pending Codex review.** A reference publisher
+(`docs/editorial-board-publisher.mjs`, with `docs/editorial-board-publisher.test.mjs`)
+specifies the skill's end-of-review step in reviewable, test-covered code — but
+the end-to-end delivery mechanism (RQ1) is still **not empirically verified in a
+real Cowork session** — see
 [Reference publisher](#reference-publisher-the-skills-end-of-review-step),
 [Delivery mechanism](#delivery-mechanism), and
 [Research questions](#research-questions). Nothing here asserts that the Cowork
@@ -106,6 +107,11 @@ recommendation, not a validation boundary. (Note: a `.md` fragment anywhere in
 `data`, including in an id, is separately rejected by the §5 public-safety scan
 as a path-like string.)
 
+**`manuscript.reviewRound` convention (producer-side).** The validator enforces
+only that `reviewRound` is a **finite number** (`typeof number` +
+`Number.isFinite`); a non-integer like `4.5` would pass. Emitting a whole
+integer is a **producer convention**, not a validation boundary.
+
 ---
 
 ## Authority rules (the boundary this contract exists to protect)
@@ -176,34 +182,46 @@ for nonconforming names).
 
 ## Reference publisher (the skill's end-of-review step)
 
-`docs/editorial-board-publisher.mjs` is the reviewable, path-tested reference for
-the skill's final step. It performs **only** the safety-critical, deterministic
-parts; the skill orchestrates around it and inserts the human checkpoint. Two
-subcommands, with Pegah's explicit approval between them:
+`docs/editorial-board-publisher.mjs` is the reviewable, test-covered reference
+for the skill's final step (tests: `docs/editorial-board-publisher.test.mjs`). It
+performs **only** the safety-critical, deterministic parts; the skill
+orchestrates around it and inserts the human checkpoint. Three subcommands,
+addressed by **opaque tokens** — never filesystem paths:
 
 - **`prepare`** — reads the two-key artifact on stdin, runs `validateInboxArtifact`
   (§2b), checks length caps, and runs the public-safety scan. **If validation
   fails, any length cap is exceeded, or the scan reports any hit → it prints
   `BLOCKED <reason>`, writes no temp, and exits non-zero.** Publish is never
   offered for a failing artifact, and nothing is left behind. On a full pass it
-  writes a non-`.json` temp the companion ignores (`.eb-publish-<uuid>.tmp`, in
-  the inbox so the later hard link stays on one filesystem), prints the bounded
-  checkpoint report (metadata + the exact reviewer/question/nextDecision
-  summaries that will become live Iteration content — there is no manuscript body
-  in the artifact), and prints `READY <tempPath>`.
-- **`publish <tempPath>`** — hard-links the approved temp to the final
-  `editorial-board-<ts>-<uuid>.json`. A hard link is atomic, never overwrites,
-  and never exposes a partial file. **Any link failure — not only `EEXIST` —
-  deletes the temp, prints `FAILED <code>`, and exits non-zero; it never retries
-  with `mv`, `cp`, overwrite, or a direct POST.** On success it deletes the temp
-  (the final link persists until the companion submits it) and prints
-  `PUBLISHED <name>`.
+  computes a **SHA-256 digest** of the staged bytes, writes them to a non-`.json`
+  temp the companion ignores — created **exclusively** (`wx`) at **mode 0600**,
+  in the inbox so the later hard link stays on one filesystem — prints the
+  bounded checkpoint report (metadata + the exact reviewer/question/nextDecision
+  summaries that become live Iteration content; there is no manuscript body in
+  the artifact), and prints `READY <token>`. The token is opaque: a 32-hex
+  staging id joined to the 64-hex digest — **no path is ever printed**.
+- **`publish <token>`** — resolves the token strictly to a **direct inbox child**
+  (rejecting traversal, absolute paths, symlinks, non-regular files, and
+  malformed tokens), **recomputes the digest and compares it to the token's
+  digest** (binding publication to the exact artifact Pegah approved), then
+  **re-runs schema validation + caps + public-safety**. Any mismatch or failure
+  publishes nothing. On full agreement it hard-links the temp to the final
+  `editorial-board-<ts>-<uuid>.json` (atomic; never overwrites; never exposes a
+  partial file). **Any link failure — not only `EEXIST` — publishes nothing and
+  never retries with `mv`, `cp`, overwrite, or a direct POST.**
+- **`discard <token>`** — resolves the token the same hardened way and removes
+  the staged temp (used when Pegah declines at the checkpoint). The skill calls
+  this instead of ever running `rm` on a supplied path.
 
-On any failure at any step the temp is removed: review data is never left in the
-inbox or in `/tmp`. The publisher never constructs a transport envelope, chooses
+On any failure at any step the temp is removed, and **cleanup failures are
+surfaced generically** (`WARN`/`FAILED cleanup-failed <code>`) — never silently
+ignored, never printing a path. Review data is never left in the inbox or in
+`/tmp`. The publisher never constructs a transport envelope, chooses
 `revision`/`payloadHash`, authenticates to the Studio, holds the sync secret, or
 asserts human authorship — those remain the companion's and the human write
-path's alone.
+path's alone. (The scratch-inbox override used by the tests is honored only under
+an explicit `EB_PUBLISHER_ALLOW_TEST_INBOX=1` flag; production always targets
+`~/.studio-inbox`.)
 
 **This reference does not itself resolve RQ1.** It is the mechanism to be
 validated in a real Cowork board session (Phase C), and only if that session can

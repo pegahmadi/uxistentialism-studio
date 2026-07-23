@@ -1,5 +1,7 @@
 # Proposed Editorial Board skill change — end-of-review publication (S1–S6)
 
+**Status: pending Codex review.**
+
 **What this is.** The exact change to add to the UXistentialism Editorial Board
 skill (hosted in Cowork, **outside this repository**). This session cannot reach
 or edit the Cowork skill files, so this is a complete **proposed instruction
@@ -34,7 +36,7 @@ validator rejects unknown fields and missing fields):
     "manuscript": {
       "id":          "<slug-style id matching the Studio concept; no spaces, no '/', no '.md'>",
       "title":       "<manuscript title>",
-      "reviewRound": <integer>,
+      "reviewRound": <integer>,                          // integer is a producer convention; validator enforces only a finite number
       "status":      "in review" | "awaiting ruling"   // NEVER "complete"
     },
     "reviewedAt":  "<exact Date.toISOString()>",
@@ -75,6 +77,10 @@ generation time):
   strings; keep every string within its length cap).
 - Timestamps are exact `Date.toISOString()` (`YYYY-MM-DDTHH:mm:ss.sssZ`) and must
   be real instants.
+- **Producer conventions, not validator boundaries:** a slug-style
+  `manuscript.id` (the validator requires only a string) and an integer
+  `reviewRound` (the validator requires only a finite number). Emit both as
+  conventions; do not rely on the validator to enforce them.
 
 ### S2–S3 — Stage + validate (fail-closed at the source)
 
@@ -86,7 +92,7 @@ printf '%s' "$ARTIFACT_JSON" | \
 ```
 
 `prepare` runs `validateInboxArtifact` (§2b), the length caps, and the
-public-safety scan.
+public-safety scan, then digests the staged bytes.
 
 ### S4 — Human checkpoint (fail-closed)
 
@@ -94,40 +100,53 @@ public-safety scan.
   or the public-safety scan reported any hit): it wrote **no** temp. The skill
   **does not offer Publish** — it reports the blocked reason to Pegah and STOPS.
   It must not attempt to "fix and force" the artifact past the gate.
-- **If `prepare` prints the checkpoint report ending in `READY <tempPath>`:**
-  capture `<tempPath>`. Show Pegah the checkpoint report (validation PASS,
-  manuscript/counts/provenance metadata, and the bounded reviewer / question /
-  nextDecision summaries), then say, in substance:
+- **If `prepare` prints the checkpoint report ending in `READY <token>`:**
+  capture `<token>` (an opaque `32hex-64hex` string — **not** a path; the skill
+  must never derive or guess a filesystem path from it). Show Pegah the
+  checkpoint report (validation PASS, manuscript/counts/provenance metadata, and
+  the bounded reviewer / question / nextDecision summaries), then say, in
+  substance:
 
   > "This becomes **persistent live Iteration content** (stored in Redis until a
   > later review supersedes it). It contains no manuscript body, transcript,
   > paths, `.md` filenames, or credentials. Publish it to the Studio?"
 
   Wait for Pegah's **explicit** approval.
-  - **Decline / no clear yes** → delete the temp and STOP:
-    `rm -f "$TEMP"` (the temp is a `.eb-publish-*.tmp` in `~/.studio-inbox/`).
+  - **Decline / no clear yes** → discard by token and STOP (the skill never
+    `rm`s a path):
+    ```
+    node /Users/pegahahmadi/Documents/uxistentialism-studio/docs/editorial-board-publisher.mjs discard "$TOKEN"
+    ```
 
-### S5 — Publish (any-failure-closed)
+### S5 — Publish (bound + any-failure-closed)
 
 On explicit approval only:
 
 ```
-node /Users/pegahahmadi/Documents/uxistentialism-studio/docs/editorial-board-publisher.mjs publish "$TEMP"
+node /Users/pegahahmadi/Documents/uxistentialism-studio/docs/editorial-board-publisher.mjs publish "$TOKEN"
 ```
 
+`publish` resolves the token to a direct inbox child, recomputes the digest and
+compares it to the approved one, re-runs schema + caps + public-safety, and only
+then hard-links into place.
+
 - `PUBLISHED <name>` → success. The final `editorial-board-<ts>-<uuid>.json` is a
-  fully-written, atomically-created link the companion will pick up.
-- **`FAILED <code>` (ANY failure, not only `link-EEXIST`)** → publication failed.
-  The publisher has already deleted the temp. The skill STOPS and reports.
-  **Never** retry with `mv`, `cp`, overwrite, or a direct POST, and never
+  fully-written, atomically-created link the companion will pick up. A trailing
+  `WARN cleanup-failed <code>` (rare) means the publish succeeded but the staging
+  temp could not be removed — surface it; do not republish.
+- **`FAILED <code>` (ANY failure — `digest-mismatch`, `revalidation-failed`, a
+  `link-*` error, a rejected token, etc.)** → publication failed and nothing was
+  written. The publisher has already removed the staged temp. The skill STOPS and
+  reports. **Never** retry with `mv`, `cp`, overwrite, or a direct POST, and never
   broaden permissions or move the secret.
 
 ### S6 — Cleanup (always)
 
-The publisher removes the temp on success and on every failure path. The skill
-additionally guarantees no `.eb-publish-*.tmp` it created is left behind if it
-aborts between steps (e.g. on decline at S4): `rm -f "$TEMP"`. Review data is
-never left in the inbox or in `/tmp`.
+The publisher removes the staged temp on success and on every failure path, and
+surfaces any cleanup failure generically. If the skill aborts between steps
+(e.g. on decline at S4), it cleans up **by token** via `discard "$TOKEN"` — never
+by constructing or `rm`-ing a path. Review data is never left in the inbox or in
+`/tmp`.
 
 ### What the skill must NEVER do
 

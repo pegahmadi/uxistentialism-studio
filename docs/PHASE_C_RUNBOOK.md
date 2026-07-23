@@ -1,6 +1,6 @@
 # Phase-C Cowork Test Runbook (WS-3 / UXI-18)
 
-**Status:** prepared, Codex-reviewed (v3 + 3 clarifications). **NOT executed.**
+**Status:** prepared; **pending Codex review**. **NOT executed.**
 Phase C runs in a real Cowork board session and is Pegah's to execute — the
 coordinator cannot run it. This runbook proves the Editorial Board skill can
 publish a structured artifact into `~/.studio-inbox/` end-to-end, through the
@@ -33,22 +33,27 @@ The skill's steps (summarized; full detail in the skill-change doc):
   completed review, per `docs/EDITORIAL_BOARD_OUTPUT.md`.
 - **S2 Stage**: pipe the artifact to `editorial-board-publisher.mjs prepare`.
 - **S3 Validate**: `prepare` runs the §2b validator + length caps +
-  public-safety scan.
+  public-safety scan, then digests the staged bytes.
 - **S4 Checkpoint (fail-closed).** **If validation fails, any length cap is
-  false, or the public-safety scan reports any hits: `prepare` deletes the temp,
+  false, or the public-safety scan reports any hits: `prepare` writes no temp,
   prints `BLOCKED <reason>`, does NOT offer Publish, and the skill STOPS and
-  reports.** Only on a full pass does `prepare` write the non-`.json` temp and
-  print the bounded checkpoint report; the skill shows it to Pegah, states that
-  it becomes persistent live Iteration content and contains no manuscript body /
+  reports.** Only on a full pass does `prepare` write the exclusive mode-0600 temp
+  and print the bounded checkpoint report ending in `READY <token>` — an **opaque
+  token**, never a path. The skill shows the report to Pegah, states that it
+  becomes persistent live Iteration content and contains no manuscript body /
   transcript / paths / `.md` / credentials, and waits for **explicit** approval.
-  Decline → the skill deletes the temp and STOPS.
-- **S5 Publish (any-failure-closed).** On approval, `publish <temp>` hard-links
-  the temp to `editorial-board-<ts>-<uuid>.json` (atomic; no overwrite; no
-  partial visibility). **ANY hard-link failure — not only `EEXIST` — deletes the
-  temp, prints `FAILED <code>`, and STOPS. Never fall back to `mv`, `cp`,
-  overwrite, or direct POST.**
-- **S6 Cleanup (always).** Temp deleted on success and on every failure path.
-  The final link persists until the companion submits + removes it.
+  Decline → the skill runs `publish`'s sibling `discard <token>` and STOPS (it
+  never `rm`s a path).
+- **S5 Publish (bound + any-failure-closed).** On approval, `publish <token>`
+  resolves the token to a direct inbox child, **recomputes the digest and
+  compares it to the approved one**, **re-runs schema + caps + public-safety**,
+  and only then hard-links to `editorial-board-<ts>-<uuid>.json` (atomic; no
+  overwrite; no partial visibility). **Any digest mismatch, revalidation failure,
+  or hard-link failure — not only `EEXIST` — publishes nothing. Never fall back
+  to `mv`, `cp`, overwrite, or direct POST.**
+- **S6 Cleanup (always).** Temp removed on success and on every failure path;
+  cleanup failures are surfaced, never silently ignored. The final link persists
+  until the companion submits + removes it.
 
 ---
 

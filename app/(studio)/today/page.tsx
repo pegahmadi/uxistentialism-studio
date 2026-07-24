@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { getTodayBriefing, type Evidence, type SyncProvenance } from "@/lib/today";
+import { TodayActiveDraft } from "@/components/studio/TodayActiveDraft";
 
 export const dynamic = "force-dynamic";
 
@@ -59,24 +60,29 @@ export default async function TodayPage() {
         className="mt-7 flex flex-col gap-[26px]"
         style={{ textWrap: "pretty" }}
       >
-        {/* primary focus */}
-        {b.focus && (
-          <div style={{ animation: "rise .7s ease .05s backwards" }}>
-            <p className="text-[17px] leading-[1.8] text-ink">
-              {b.focus.href ? (
-                <>
-                  {b.focus.text}{" "}
-                  <Link href={b.focus.href} className={link}>
-                    ↵
-                  </Link>
-                </>
-              ) : (
-                b.focus.text
-              )}
-            </p>
-            <Provenance evidence={b.focus.evidence} />
-          </div>
-        )}
+        {/* primary focus — an active Studio draft takes priority over the
+            legacy Workspace manuscript; with no draft, this renders unchanged. */}
+        <TodayActiveDraft
+          fallback={
+            b.focus ? (
+              <div style={{ animation: "rise .7s ease .05s backwards" }}>
+                <p className="text-[17px] leading-[1.8] text-ink">
+                  {b.focus.href ? (
+                    <>
+                      {b.focus.text}{" "}
+                      <Link href={b.focus.href} className={link}>
+                        ↵
+                      </Link>
+                    </>
+                  ) : (
+                    b.focus.text
+                  )}
+                </p>
+                <Provenance evidence={b.focus.evidence} />
+              </div>
+            ) : null
+          }
+        />
 
         {/* one field movement / emerging concept */}
         {b.movement && (

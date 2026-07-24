@@ -57,6 +57,12 @@ export interface IterationView {
     venue: string | null;
     evidence: Evidence[];
   };
+  /**
+   * The board's OWN manuscript id, unmerged. The writing surface compares this
+   * against the open draft's id so board advice is never attached to a different
+   * manuscript. Null when the board names no manuscript.
+   */
+  boardManuscriptId: string | null;
   /** Honest mismatch when Workspace and board disagree on the round (req 5). */
   roundMismatch: { workspace: number; board: number } | null;
   consequentialQuestion: { text: string; evidence: Evidence[] } | null;
@@ -180,6 +186,7 @@ export async function getIterationView(): Promise<IterationView> {
   return {
     question: ITERATION_QUESTION,
     manuscript: { id, title, round, status, venue, evidence: manuscriptEvidence },
+    boardManuscriptId: board?.manuscript?.id ?? null,
     roundMismatch,
     consequentialQuestion,
     board: { stance, summary, reviewers, evidence: boardEvidence },

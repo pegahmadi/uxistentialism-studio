@@ -93,3 +93,66 @@ body {
 .env-enter {
   animation: settle 0.45s cubic-bezier(0.22, 0.75, 0.3, 1);
 }
+
+/*
+  ── manuscript editor (Personal Writing MVP) ──
+  Typography of the manuscript pane, preserved from the curated body it replaces:
+  sans at 17px/1.8 for prose, serif for headings (the v3 "headlines" role).
+  Tailwind's reset strips list markers, so lists restate them explicitly.
+*/
+.manuscript-prose:focus {
+  outline: none;
+}
+.manuscript-prose > * {
+  margin: 0 0 1.25rem;
+}
+.manuscript-prose > *:last-child {
+  margin-bottom: 0;
+}
+.manuscript-prose h1,
+.manuscript-prose h2 {
+  font-family: var(--font-libre), Georgia, serif;
+  color: var(--ink);
+  line-height: 1.3;
+}
+.manuscript-prose h1 {
+  font-size: 27px;
+  margin-top: 2rem;
+}
+.manuscript-prose h2 {
+  font-size: 21px;
+  margin-top: 1.75rem;
+}
+.manuscript-prose ul,
+.manuscript-prose ol {
+  padding-left: 1.4em;
+}
+.manuscript-prose ul {
+  list-style: disc;
+}
+.manuscript-prose ol {
+  list-style: decimal;
+}
+.manuscript-prose li {
+  margin: 0.3em 0;
+}
+.manuscript-prose li > p {
+  margin: 0;
+}
+.manuscript-prose blockquote {
+  border-left: 2px solid var(--line2);
+  padding-left: 1em;
+  color: var(--strong);
+  font-style: italic;
+}
+.manuscript-prose a {
+  color: var(--ink);
+  text-decoration: none;
+  border-bottom: 1px solid var(--faint);
+}
+.manuscript-prose code {
+  font-family: var(--font-scp), monospace;
+  font-size: 0.9em;
+  background: var(--surface);
+  padding: 0.1em 0.3em;
+}

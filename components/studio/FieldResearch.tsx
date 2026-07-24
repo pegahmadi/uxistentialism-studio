@@ -3,31 +3,35 @@
 // Field Research (WS-Field-Research) — one explicit action, a sourced brief,
 // approve/dismiss per finding. Nothing runs on its own: the brief appears only
 // after Pegah triggers it, and re-rendering restored state is not re-running
-// research.
+// research. When no live provider is connected the action is labelled as a
+// demonstration preview — it never implies that clicking performs research.
 //
-// Approved findings are staged LOCALLY (this browser's localStorage) and the
-// companion routing step is marked unimplemented, per the boundary rule in
-// docs/workstreams/ws-field-research/WORKSTREAM.md: there is no field-research
-// ingestion mechanism today, and the editorial-board endpoint must not be
-// reused (its provenance is pinned to the Board). The smallest proposed
-// contract change is in docs/workstreams/ws-field-research/ROUTING_PROPOSAL.md.
-// Dismissing is non-destructive: the finding and its source data remain, and
-// every decision can be reconsidered.
+// Approved findings move to a visible "Approved queue" staged in this
+// browser's localStorage; vault delivery is not connected yet and the queue
+// says so in user-facing language. Dismissing is non-destructive: the finding
+// and its source data remain, and every decision can be reconsidered. If
+// browser storage is unavailable, the UI says decisions are not saved rather
+// than silently presenting them as persistent.
 
 import { useSyncExternalStore } from "react";
 import type { DataSource } from "@/lib/data-result";
-import { attributableFindings, type FindingLevel, type ResearchBrief } from "@/lib/field-research";
+import { attributableFindings, type FindingLevel, type ResearchBrief, type ResearchFinding } from "@/lib/field-research";
 
 type Decision = "approved" | "dismissed";
 
 interface StoredState {
-  /** ISO timestamp of the one explicit trigger; null = not yet researched. */
+  /** ISO timestamp of the one explicit trigger; null = not yet requested. */
   requestedAt: string | null;
   decisions: Record<string, Decision>;
 }
 
+interface StoreSnapshot extends StoredState {
+  /** True when a localStorage write failed — decisions will not persist. */
+  persistFailed: boolean;
+}
+
 const STORAGE_KEY = "uxi-field-research-v1";
-const EMPTY: StoredState = { requestedAt: null, decisions: {} };
+const EMPTY: StoreSnapshot = { requestedAt: null, decisions: {}, persistFailed: false };
 
 function readStored(): StoredState {
   try {
@@ -48,18 +52,20 @@ function readStored(): StoredState {
   }
 }
 
-function writeStored(state: StoredState) {
+/** @returns whether the write actually persisted. */
+function writeStored(state: StoredState): boolean {
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ requestedAt: state.requestedAt, decisions: state.decisions }));
+    return true;
   } catch {
-    /* storage unavailable — decisions simply won't persist; never throw */
+    return false; // storage unavailable — surfaced as "Decisions not saved"
   }
 }
 
 // localStorage as an external store (useSyncExternalStore): the server
 // snapshot is the stable EMPTY state, the client snapshot is read once and
 // cached, and every update goes through setStored so subscribers re-render.
-let storeCache: StoredState | null = null;
+let storeCache: StoreSnapshot | null = null;
 const storeListeners = new Set<() => void>();
 
 function subscribeStore(listener: () => void): () => void {
@@ -67,18 +73,18 @@ function subscribeStore(listener: () => void): () => void {
   return () => storeListeners.delete(listener);
 }
 
-function getStoreSnapshot(): StoredState {
-  if (storeCache === null) storeCache = readStored();
+function getStoreSnapshot(): StoreSnapshot {
+  if (storeCache === null) storeCache = { ...readStored(), persistFailed: false };
   return storeCache;
 }
 
-function getServerSnapshot(): StoredState {
+function getServerSnapshot(): StoreSnapshot {
   return EMPTY;
 }
 
 function setStored(next: StoredState) {
-  storeCache = next;
-  writeStored(next);
+  const persisted = writeStored(next);
+  storeCache = { ...next, persistFailed: !persisted };
   storeListeners.forEach((l) => l());
 }
 
@@ -98,6 +104,18 @@ function marks(relevance: FindingLevel, confidence: FindingLevel) {
   );
 }
 
+function sourceLine(f: ResearchFinding, isSample: boolean) {
+  return (
+    <div className="mt-2 font-mono text-[11px] tracking-[0.04em] text-faint">
+      source:{" "}
+      <a href={f.source.url} target="_blank" rel="noopener noreferrer" className="underline decoration-line2 underline-offset-2 hover:text-muted">
+        {f.source.title}
+      </a>
+      {isSample && " · sample"}
+    </div>
+  );
+}
+
 export function FieldResearch({ brief, source }: { brief: ResearchBrief; source: DataSource }) {
   // Server renders the EMPTY snapshot; after hydration the client snapshot
   // (localStorage) takes over and any stored decisions appear.
@@ -106,7 +124,7 @@ export function FieldResearch({ brief, source }: { brief: ResearchBrief; source:
   const findings = attributableFindings(brief); // unsourced findings are never shown
   const isSample = source !== "live"; // "default"/"fallback" = sample tiers; never imply a live source
 
-  const research = () => {
+  const request = () => {
     if (stored.requestedAt) return; // one explicit trigger
     setStored({ ...stored, requestedAt: new Date().toISOString() });
   };
@@ -120,9 +138,10 @@ export function FieldResearch({ brief, source }: { brief: ResearchBrief; source:
 
   const requested = stored.requestedAt;
   const decisions = stored.decisions;
-  const approvedCount = findings.filter((f) => decisions[f.id] === "approved").length;
+  const approved = findings.filter((f) => decisions[f.id] === "approved");
+  const rest = findings.filter((f) => decisions[f.id] !== "approved"); // pending + dismissed stay in the brief
   const dismissedCount = findings.filter((f) => decisions[f.id] === "dismissed").length;
-  const pendingCount = findings.length - approvedCount - dismissedCount;
+  const pendingCount = findings.length - approved.length - dismissedCount;
 
   return (
     <div className="mb-2 border-b border-line pb-6">
@@ -132,12 +151,14 @@ export function FieldResearch({ brief, source }: { brief: ResearchBrief; source:
           <div className="mt-1 text-[13px] text-muted">one explicit action — nothing runs on its own</div>
         </div>
         {!requested && (
-          <button onClick={research} className="cursor-pointer border border-line2 px-3.5 py-1.5 text-[13px] font-medium text-strong hover:bg-surface">
-            Research the field
+          <button onClick={request} className="cursor-pointer border border-line2 px-3.5 py-1.5 text-[13px] font-medium text-strong hover:bg-surface">
+            {isSample ? "Preview demonstration brief" : "Research the field"}
           </button>
         )}
         {requested && (
-          <span className="font-mono text-[11px] tracking-[0.04em] text-faint">researched {requested}</span>
+          <span className="font-mono text-[11px] tracking-[0.04em] text-faint">
+            {isSample ? "previewed" : "researched"} {requested}
+          </span>
         )}
       </div>
 
@@ -149,8 +170,14 @@ export function FieldResearch({ brief, source }: { brief: ResearchBrief; source:
             </div>
           )}
 
+          {stored.persistFailed && (
+            <div className="mt-3 font-mono text-[11px] tracking-[0.04em] text-amber">
+              Decisions not saved — browser storage is unavailable; approvals and dismissals will not survive a refresh
+            </div>
+          )}
+
           <div className="mt-1">
-            {findings.map((f) => {
+            {rest.map((f) => {
               const decision = decisions[f.id] ?? null;
               return (
                 <div key={f.id} className="border-b border-line py-4 last:border-b-0" style={{ opacity: decision === "dismissed" ? 0.55 : 1 }}>
@@ -158,17 +185,17 @@ export function FieldResearch({ brief, source }: { brief: ResearchBrief; source:
                     <span className="flex items-baseline gap-2.5">
                       <span className="text-[11px] font-semibold tracking-[0.08em] text-strong">FINDING</span>
                       {decision === null && <span className="font-mono text-[11px] tracking-[0.04em] text-amber">needs judgment</span>}
-                      {decision === "approved" && <span className="font-mono text-[11px] tracking-[0.04em] text-strong">approved · staged locally</span>}
                       {decision === "dismissed" && <span className="font-mono text-[11px] tracking-[0.04em] text-faint">dismissed</span>}
                     </span>
                     {marks(f.relevance, f.confidence)}
                   </div>
                   <div className="mt-[7px] font-serif text-[17px] leading-snug text-ink">{f.title}</div>
                   <div className="mt-2 text-[14px] leading-[1.7] text-strong">{f.summary}</div>
-                  <div className="mt-2 font-mono text-[11px] tracking-[0.04em] text-faint">
-                    source: {f.source.title} · {f.source.url}
-                    {isSample && " · sample"}
+                  <div className="mt-3">
+                    <div className="text-[11px] font-semibold tracking-[0.08em] text-muted">WHY THIS MATTERS</div>
+                    <div className="mt-1 text-[14px] leading-[1.7] text-strong">{f.relevanceToPegah}</div>
                   </div>
+                  {sourceLine(f, isSample)}
                   <div className="mt-3 flex gap-2 text-[13px] font-medium">
                     {decision === null ? (
                       <>
@@ -191,12 +218,31 @@ export function FieldResearch({ brief, source }: { brief: ResearchBrief; source:
           </div>
 
           <div className="mt-4 font-mono text-[11px] tracking-[0.04em] text-muted">
-            {approvedCount} approved · {dismissedCount} dismissed · {pendingCount} awaiting judgment
+            {approved.length} approved · {dismissedCount} dismissed · {pendingCount} awaiting judgment
           </div>
-          <div className="mt-2 font-mono text-[11px] leading-relaxed tracking-[0.04em] text-amber">
-            routing to the companion boundary: unimplemented — approved findings are staged in this browser only; smallest
-            contract change proposed to the Coordinator (docs/workstreams/ws-field-research/ROUTING_PROPOSAL.md)
-          </div>
+
+          {approved.length > 0 && (
+            <div className="mt-5 border border-line2 bg-surface px-4 pb-4 pt-3">
+              <div className="flex items-baseline justify-between gap-3">
+                <span className="text-[11px] font-semibold tracking-[0.08em] text-strong">APPROVED QUEUE</span>
+                <span className="font-mono text-[11px] tracking-[0.04em] text-muted">Approved here · vault delivery is not connected yet.</span>
+              </div>
+              {approved.map((f) => (
+                <div key={f.id} className="border-b border-line py-3 last:border-b-0 last:pb-0">
+                  <div className="flex items-baseline justify-between gap-3">
+                    <span className="font-serif text-[15px] leading-snug text-ink">{f.title}</span>
+                    {marks(f.relevance, f.confidence)}
+                  </div>
+                  {sourceLine(f, isSample)}
+                  <div className="mt-2 flex gap-2 text-[13px] font-medium">
+                    <button onClick={() => decide(f.id, null)} className="cursor-pointer px-2 py-0.5 text-muted hover:bg-paper">
+                      Reconsider
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>

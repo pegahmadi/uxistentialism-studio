@@ -24,6 +24,8 @@ export interface ResearchFinding {
   source: { title: string; url: string };
   relevance: FindingLevel;
   confidence: FindingLevel;
+  /** Why this matters to Pegah's work — an explanation, not a rating. */
+  relevanceToPegah: string;
 }
 
 export interface ResearchBrief {
@@ -46,6 +48,8 @@ const SAMPLE_BRIEF: ResearchBrief = {
       source: { title: "Approval queues in agent-native tooling", url: "https://example.com/agent-approval-queues" },
       relevance: "high",
       confidence: "medium",
+      relevanceToPegah:
+        "This is the Authority Architecture thesis appearing in shipping software: if the approval surface is where design authority is exercised, that surface deserves to be designed — which is the case Magnolia and the Studio are both making.",
     },
     {
       id: "provenance-in-design-systems",
@@ -55,6 +59,8 @@ const SAMPLE_BRIEF: ResearchBrief = {
       source: { title: "Provenance fields in component pipelines", url: "https://example.com/provenance-in-design-systems" },
       relevance: "high",
       confidence: "low",
+      relevanceToPegah:
+        "Visible provenance is a founding rule of the Studio; if the industry converges on the same instinct, her governance writing moves from prescription to description — worth claiming early.",
     },
     {
       id: "mcp-registries",
@@ -64,6 +70,8 @@ const SAMPLE_BRIEF: ResearchBrief = {
       source: { title: "Registry consolidation in the agent tool layer", url: "https://example.com/mcp-registries" },
       relevance: "medium",
       confidence: "medium",
+      relevanceToPegah:
+        "Extends her existing MCP signal: the open question 'where should authority live in an AI-native system?' now has a concrete new answer to examine — registry maintainers.",
     },
     {
       id: "craft-to-governance",
@@ -73,6 +81,8 @@ const SAMPLE_BRIEF: ResearchBrief = {
       source: { title: "Governance language in design leadership roles", url: "https://example.com/craft-to-governance" },
       relevance: "medium",
       confidence: "low",
+      relevanceToPegah:
+        "Signals an audience forming for the Dear Human practice: if leadership roles are being framed around decision rights, the people hiring for them need exactly the decision-capture vocabulary she is building.",
     },
   ],
 };

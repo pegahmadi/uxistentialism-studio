@@ -1,4 +1,5 @@
 import { FieldView } from "@/components/studio/FieldView";
+import { getResearchBrief } from "@/lib/field-research";
 import { getGraph, getGraphDetails, getProjection } from "@/lib/projection";
 
 export const dynamic = "force-dynamic";
@@ -17,9 +18,11 @@ export default async function FieldPage() {
   const projection = await getProjection();
   const { nodes, edges } = getGraph(projection);
   const details = getGraphDetails(projection);
+  // One research snapshot per request (§8) — sample data in v1, labelled as such in the UI.
+  const research = await getResearchBrief();
   return (
     <div className="relative flex h-full flex-col">
-      <FieldView graphNodes={nodes} graphEdges={edges} details={details} />
+      <FieldView graphNodes={nodes} graphEdges={edges} details={details} researchBrief={research.data} researchSource={research.source} />
       {/* data-layer provenance — live / fixture / stale, never silent (§8) */}
       <div className="pointer-events-none absolute bottom-2 right-4 font-mono text-[10px] tracking-[0.06em] text-faint">
         {provenanceLabel(projection.source, projection.lastSuccessfulSync, projection.stale)}

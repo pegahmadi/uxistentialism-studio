@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { getTodayBriefing, type Evidence, type SyncProvenance } from "@/lib/today";
-import { TodayActiveDraft } from "@/components/studio/TodayActiveDraft";
+import { TodayActiveDraft, TodayLegacyManuscriptAction } from "@/components/studio/TodayActiveDraft";
 
 export const dynamic = "force-dynamic";
 
@@ -46,6 +46,25 @@ export default async function TodayPage() {
   if (b.sources.board === "editorial-board") parts.push("the Editorial Board");
   const joined = parts.length > 1 ? `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}` : parts[0];
   const sourceLine = workspaceLive ? `Drawn from ${joined}.` : `Drawn from ${joined} — no Workspace set yet.`;
+
+  // The next action, and whether it is the one that points back at the legacy
+  // manuscript. Only that one is suppressed while a Studio draft is open —
+  // Formation and Field actions always stand.
+  const actionIsManuscript = b.action?.href === "/iteration";
+  const actionNode = b.action ? (
+    <div style={{ animation: "rise .7s ease .42s backwards" }}>
+      <p className="text-[17px] leading-[1.8] text-strong">
+        {b.action.href ? (
+          <Link href={b.action.href} className={`${link} font-medium`}>
+            {b.action.text}
+          </Link>
+        ) : (
+          b.action.text
+        )}
+      </p>
+      <Provenance evidence={b.action.evidence} />
+    </div>
+  ) : null;
 
   return (
     <div className="mx-auto max-w-[620px] px-9 pb-[72px] pt-[84px]">
@@ -112,21 +131,13 @@ export default async function TodayPage() {
           </div>
         )}
 
-        {/* one next action */}
-        {b.action && (
-          <div style={{ animation: "rise .7s ease .42s backwards" }}>
-            <p className="text-[17px] leading-[1.8] text-strong">
-              {b.action.href ? (
-                <Link href={b.action.href} className={`${link} font-medium`}>
-                  {b.action.text}
-                </Link>
-              ) : (
-                b.action.text
-              )}
-            </p>
-            <Provenance evidence={b.action.evidence} />
-          </div>
-        )}
+        {/* one next action — the manuscript-linked one steps aside for an open draft */}
+        {actionNode &&
+          (actionIsManuscript ? (
+            <TodayLegacyManuscriptAction>{actionNode}</TodayLegacyManuscriptAction>
+          ) : (
+            actionNode
+          ))}
 
         {/* optional short note from the Workspace */}
         {b.note && (

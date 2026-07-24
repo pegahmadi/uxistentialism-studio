@@ -15,7 +15,7 @@
 
 import Link from "next/link";
 import { UNTITLED } from "@/lib/manuscripts";
-import { useManuscriptStoreReadOnly } from "./useManuscriptStore";
+import { useMeaningfulDraft } from "./useManuscriptStore";
 
 const link = "cursor-pointer border-b border-line2 text-ink hover:border-muted";
 
@@ -32,10 +32,10 @@ function updatedLabel(iso: string): string | null {
 }
 
 export function TodayActiveDraft({ fallback }: { fallback: React.ReactNode }) {
-  const store = useManuscriptStoreReadOnly();
-  const draft = store?.docs.find((d) => d.key === store.activeKey) ?? null;
+  const draft = useMeaningfulDraft();
 
-  // No drafts in this browser (and during SSR) — the Workspace focus stands.
+  // No draft worth showing — during SSR, with no drafts at all, or when the only
+  // draft is the pristine blank page Iteration seeds. The Workspace focus stands.
   if (!draft) return <>{fallback}</>;
 
   const title = draft.title.trim() || UNTITLED;
@@ -62,4 +62,17 @@ export function TodayActiveDraft({ fallback }: { fallback: React.ReactNode }) {
       </div>
     </div>
   );
+}
+
+/**
+ * Hides the legacy Workspace *manuscript* action while a meaningful Studio draft
+ * is active, so Today never offers "Continue writing" for the open draft and
+ * "Open <the old manuscript>" in the same briefing. With no meaningful draft the
+ * legacy action renders untouched. Only the manuscript-linked action is wrapped;
+ * Formation and Field actions are never suppressed.
+ */
+export function TodayLegacyManuscriptAction({ children }: { children: React.ReactNode }) {
+  const draft = useMeaningfulDraft();
+  if (draft) return null;
+  return <>{children}</>;
 }

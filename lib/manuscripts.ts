@@ -90,6 +90,37 @@ export function coerceStore(v: unknown): ManuscriptStore {
   return { version: 1, docs, activeKey };
 }
 
+/** Concatenated text of a TipTap document — used only to ask "did anyone write?" */
+export function documentText(content: DocJSON): string {
+  let out = "";
+  const walk = (node: unknown): void => {
+    if (Array.isArray(node)) {
+      node.forEach(walk);
+      return;
+    }
+    if (!node || typeof node !== "object") return;
+    const o = node as Record<string, unknown>;
+    if (typeof o.text === "string") out += o.text;
+    if (Array.isArray(o.content)) walk(o.content);
+  };
+  walk(content);
+  return out;
+}
+
+/**
+ * A draft becomes meaningful the moment it carries something Pegah wrote — a
+ * real title OR any body text. The blank document Iteration auto-seeds (so the
+ * editor always has a page open) is deliberately NOT meaningful: Today would
+ * otherwise point at "Untitled" and bury the Workspace focus behind an empty
+ * page. An Untitled draft that has body text IS meaningful — the writing is what
+ * counts, not the naming.
+ */
+export function isMeaningfulDraft(m: Manuscript): boolean {
+  const title = m.title.trim();
+  if (title !== "" && title !== UNTITLED) return true;
+  return documentText(m.content).trim() !== "";
+}
+
 export function loadStore(): ManuscriptStore {
   if (typeof window === "undefined") return emptyStore();
   try {

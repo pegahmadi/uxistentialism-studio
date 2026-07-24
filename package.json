@@ -11,6 +11,10 @@
     "validate-projection": "node tools/validate-projection.mjs"
   },
   "dependencies": {
+    "@tiptap/extension-link": "^3.28.0",
+    "@tiptap/pm": "^3.28.0",
+    "@tiptap/react": "^3.28.0",
+    "@tiptap/starter-kit": "^3.28.0",
     "@upstash/redis": "^1.38.0",
     "next": "16.2.10",
     "react": "19.2.4",

@@ -3,6 +3,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { SIGNALS, ideasInMode, type GraphNode, type GraphEdge, type NodeKind } from "@/lib/content";
 import type { NodeDetail } from "@/lib/projection";
+import type { DataSource } from "@/lib/data-result";
+import type { ResearchBrief } from "@/lib/field-research";
+import { FieldResearch } from "@/components/studio/FieldResearch";
 import { IdeaCard } from "@/components/ui/IdeaCard";
 
 const GRAPH_W = 960;
@@ -28,10 +31,14 @@ export function FieldView({
   graphNodes,
   graphEdges,
   details,
+  researchBrief,
+  researchSource,
 }: {
   graphNodes: GraphNode[];
   graphEdges: GraphEdge[];
   details: Record<string, NodeDetail>;
+  researchBrief: ResearchBrief;
+  researchSource: DataSource;
 }) {
   const [view, setView] = useState<"list" | "graph">("list");
   const [openSignal, setOpenSignal] = useState<number>(-1);
@@ -132,6 +139,7 @@ export function FieldView({
       {view === "list" ? (
         <div className="flex-1 overflow-y-auto">
           <div className="mx-auto flex max-w-[680px] flex-col px-9 pb-[72px] pt-6">
+            <FieldResearch brief={researchBrief} source={researchSource} />
             {SIGNALS.map((s, i) => {
               const mom = MOMENTUM[s.id] ?? { m: "in the field", c: "#78716c" };
               const open = openSignal === i;

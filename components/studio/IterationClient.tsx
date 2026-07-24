@@ -37,13 +37,38 @@ export function IterationClient({ view }: { view: IterationView }) {
   const applying = useRef(false); // suppress autosave while loading a doc into the editor
   const fileInput = useRef<HTMLInputElement>(null);
 
+  // The store awaiting a debounced write. Held in a ref so a flush always writes
+  // the LATEST edit, never a stale closure.
+  const pending = useRef<ManuscriptStore | null>(null);
+
+  /**
+   * Write any pending store immediately and synchronously. Called on pagehide and
+   * on unmount so edits made inside the debounce window survive navigating away,
+   * refreshing, or closing the tab. Deliberately sets no state — it can run while
+   * the component is being torn down.
+   */
+  const flush = useCallback(() => {
+    if (timer.current) {
+      window.clearTimeout(timer.current);
+      timer.current = null;
+    }
+    const p = pending.current;
+    if (!p) return;
+    pending.current = null;
+    saveStore(p);
+  }, []);
+
   /** Persist on a short debounce so the status reads Saving… then Saved. */
   const commit = useCallback((next: ManuscriptStore) => {
     setManuscriptStore(next);
+    pending.current = next;
     setStatus("saving");
     if (timer.current) window.clearTimeout(timer.current);
     timer.current = window.setTimeout(() => {
-      setStatus(saveStore(next) ? "saved" : "error");
+      timer.current = null;
+      const p = pending.current;
+      pending.current = null;
+      setStatus(p && saveStore(p) ? "saved" : "error");
     }, AUTOSAVE_MS);
   }, []);
 
@@ -93,9 +118,16 @@ export function IterationClient({ view }: { view: IterationView }) {
     applying.current = false;
   }, [editor, active]);
 
-  useEffect(() => () => {
-    if (timer.current) window.clearTimeout(timer.current);
-  }, []);
+  // Never lose an edit made inside the debounce window: flush on pagehide (covers
+  // navigation, refresh, tab close, and bfcache) and again on unmount.
+  useEffect(() => {
+    const onPageHide = () => flush();
+    window.addEventListener("pagehide", onPageHide);
+    return () => {
+      window.removeEventListener("pagehide", onPageHide);
+      flush();
+    };
+  }, [flush]);
 
   // ── document operations ────────────────────────────────────────────────────
   const createDoc = (type: ManuscriptType) => {
